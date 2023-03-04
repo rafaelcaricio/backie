@@ -19,7 +19,7 @@ Background task processing library for Rust. It uses Postgres DB as a task queue
  - Unique tasks.
    Tasks are not duplicated in the queue if they are unique
  - Single-purpose workers.
-   Tasks are stored in a single table but workers can execute only tasks of the specific type
+   Tasks are stored in a single table but workers can be configured to execute only tasks of a specific type
  - Retries.
    Tasks can be retried with a custom backoff mode
 
