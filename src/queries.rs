@@ -1,28 +1,17 @@
-use crate::runnable::AsyncRunnable;
+use crate::errors::AsyncQueueError;
 use crate::fang_task_state::FangTaskState;
+use crate::runnable::AsyncRunnable;
 use crate::schema::fang_tasks;
-use crate::errors::CronError;
-use crate::Scheduled::*;
-use crate::task::{DEFAULT_TASK_TYPE, Task};
-use async_trait::async_trait;
+use crate::task::NewTask;
+use crate::task::{Task, DEFAULT_TASK_TYPE};
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
-use cron::Schedule;
 use diesel::prelude::*;
-use diesel::result::Error::QueryBuilderError;
 use diesel::ExpressionMethods;
-use diesel_async::scoped_futures::ScopedFutureExt;
-use diesel_async::AsyncConnection;
-use diesel_async::{pg::AsyncPgConnection, pooled_connection::bb8::Pool, pooled_connection::bb8::PooledConnection, RunQueryDsl};
-use diesel_async::pooled_connection::PoolableConnection;
+use diesel_async::{pg::AsyncPgConnection, RunQueryDsl};
 use sha2::{Digest, Sha256};
-use std::str::FromStr;
-use typed_builder::TypedBuilder;
 use uuid::Uuid;
-use crate::task::NewTask;
-use crate::errors::AsyncQueueError;
-
 
 impl Task {
     pub async fn remove_all_scheduled_tasks(
@@ -120,7 +109,10 @@ impl Task {
             .limit(1)
             .filter(fang_tasks::scheduled_at.le(Utc::now()))
             .filter(fang_tasks::state.eq_any(vec![FangTaskState::New, FangTaskState::Retried]))
-            .filter(fang_tasks::task_type.eq(task_type.unwrap_or_else(|| DEFAULT_TASK_TYPE.to_string())))
+            .filter(
+                fang_tasks::task_type
+                    .eq(task_type.unwrap_or_else(|| DEFAULT_TASK_TYPE.to_string())),
+            )
             .for_update()
             .skip_locked()
             .get_result::<Task>(connection)

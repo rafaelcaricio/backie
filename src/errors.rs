@@ -1,3 +1,4 @@
+use serde_json::Error as SerdeError;
 use thiserror::Error;
 
 /// An error that can happen during executing of tasks
@@ -5,6 +6,21 @@ use thiserror::Error;
 pub struct FangError {
     /// A description of an error
     pub description: String,
+}
+
+impl From<AsyncQueueError> for FangError {
+    fn from(error: AsyncQueueError) -> Self {
+        let message = format!("{error:?}");
+        FangError {
+            description: message,
+        }
+    }
+}
+
+impl From<SerdeError> for FangError {
+    fn from(error: SerdeError) -> Self {
+        Self::from(AsyncQueueError::SerdeError(error))
+    }
 }
 
 /// List of error types that can occur while working with cron schedules.
@@ -32,7 +48,7 @@ pub enum AsyncQueueError {
     #[error("returned invalid result (expected {expected:?}, found {found:?})")]
     ResultError { expected: u64, found: u64 },
     #[error(
-    "AsyncQueue is not connected :( , call connect() method first and then perform operations"
+        "AsyncQueue is not connected :( , call connect() method first and then perform operations"
     )]
     NotConnectedError,
     #[error("Can not convert `std::time::Duration` to `chrono::Duration`")]

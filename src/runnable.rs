@@ -1,28 +1,10 @@
-use crate::errors::AsyncQueueError;
-use crate::queue::AsyncQueueable;
 use crate::errors::FangError;
+use crate::queue::AsyncQueueable;
 use crate::Scheduled;
 use async_trait::async_trait;
-use serde_json::Error as SerdeError;
 
 const COMMON_TYPE: &str = "common";
 pub const RETRIES_NUMBER: i32 = 20;
-
-impl From<AsyncQueueError> for FangError {
-    fn from(error: AsyncQueueError) -> Self {
-        let message = format!("{error:?}");
-        FangError {
-            description: message,
-        }
-    }
-}
-
-impl From<SerdeError> for FangError {
-    fn from(error: SerdeError) -> Self {
-        Self::from(AsyncQueueError::SerdeError(error))
-    }
-}
-
 /// Implement this trait to run your custom tasks.
 #[typetag::serde(tag = "type")]
 #[async_trait]

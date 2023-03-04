@@ -1,33 +1,24 @@
-use crate::runnable::AsyncRunnable;
-use crate::fang_task_state::FangTaskState;
-use crate::schema::fang_tasks;
+use crate::errors::AsyncQueueError;
 use crate::errors::CronError;
+use crate::fang_task_state::FangTaskState;
+use crate::runnable::AsyncRunnable;
+use crate::schema::fang_tasks;
+use crate::task::Task;
 use crate::Scheduled::*;
-use crate::task::{DEFAULT_TASK_TYPE, Task};
 use async_trait::async_trait;
-use chrono::DateTime;
-use chrono::Duration;
 use chrono::Utc;
-use crate::task::NewTask;
 use cron::Schedule;
 use diesel::result::Error::QueryBuilderError;
-use diesel::ExpressionMethods;
 use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::AsyncConnection;
-use diesel_async::{pg::AsyncPgConnection, pooled_connection::bb8::Pool, pooled_connection::AsyncDieselConnectionManager, RunQueryDsl};
-use sha2::{Sha256};
+use diesel_async::{pg::AsyncPgConnection, pooled_connection::bb8::Pool, RunQueryDsl};
 use std::str::FromStr;
-use diesel_async::pooled_connection::PoolableConnection;
-use thiserror::Error;
-use crate::errors::AsyncQueueError;
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
-
 
 /// This trait defines operations for an asynchronous queue.
 /// The trait can be implemented for different storage backends.
 /// For now, the trait is only implemented for PostgreSQL. More backends are planned to be implemented in the future.
-
 #[async_trait]
 pub trait AsyncQueueable: Send {
     /// This method should retrieve one task of the `task_type` type. If `task_type` is `None` it will try to
@@ -100,12 +91,12 @@ pub trait AsyncQueueable: Send {
 ///     ```
 ///
 #[derive(TypedBuilder, Debug, Clone)]
-pub struct AsyncQueue {
+pub struct PgAsyncQueue {
     pool: Pool<AsyncPgConnection>,
 }
 
 #[async_trait]
-impl AsyncQueueable for AsyncQueue {
+impl AsyncQueueable for PgAsyncQueue {
     async fn find_task_by_id(&mut self, id: Uuid) -> Result<Task, AsyncQueueError> {
         let mut connection = self
             .pool
@@ -131,18 +122,13 @@ impl AsyncQueueable for AsyncQueue {
                         return Ok(None);
                     };
 
-                    match Task::update_task_state(
-                        conn,
-                        found_task,
-                        FangTaskState::InProgress,
-                    )
-                        .await
+                    match Task::update_task_state(conn, found_task, FangTaskState::InProgress).await
                     {
                         Ok(updated_task) => Ok(Some(updated_task)),
                         Err(err) => Err(err),
                     }
                 }
-                    .scope_boxed()
+                .scope_boxed()
             })
             .await
     }
@@ -281,8 +267,7 @@ impl AsyncQueueable for AsyncQueue {
             .get()
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
-        let task =
-            Task::schedule_retry(&mut connection, task, backoff_seconds, error).await?;
+        let task = Task::schedule_retry(&mut connection, task, backoff_seconds, error).await?;
         Ok(task)
     }
 }
@@ -290,12 +275,12 @@ impl AsyncQueueable for AsyncQueue {
 #[cfg(test)]
 mod async_queue_tests {
     use super::*;
-    use crate::schema::fang_tasks::task_type;
     use crate::errors::FangError;
     use crate::Scheduled;
     use async_trait::async_trait;
     use chrono::prelude::*;
     use chrono::DateTime;
+    use chrono::Duration;
     use chrono::Utc;
     use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
     use diesel_async::AsyncPgConnection;
@@ -353,7 +338,7 @@ mod async_queue_tests {
     #[tokio::test]
     async fn insert_task_creates_new_task() {
         let pool = pool().await;
-        let mut test = AsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::builder().pool(pool).build();
 
         let task = insert_task(&mut test, &AsyncTask { number: 1 }).await;
 
@@ -370,7 +355,7 @@ mod async_queue_tests {
     #[tokio::test]
     async fn update_task_state_test() {
         let pool = pool().await;
-        let mut test = AsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::builder().pool(pool).build();
 
         let task = insert_task(&mut test, &AsyncTask { number: 1 }).await;
 
@@ -396,7 +381,7 @@ mod async_queue_tests {
     #[tokio::test]
     async fn failed_task_query_test() {
         let pool = pool().await;
-        let mut test = AsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::builder().pool(pool).build();
 
         let task = insert_task(&mut test, &AsyncTask { number: 1 }).await;
 
@@ -420,7 +405,7 @@ mod async_queue_tests {
     #[tokio::test]
     async fn remove_all_tasks_test() {
         let pool = pool().await;
-        let mut test = AsyncQueue::builder().pool(pool.into()).build();
+        let mut test = PgAsyncQueue::builder().pool(pool.into()).build();
 
         let task = insert_task(&mut test, &AsyncTask { number: 1 }).await;
 
@@ -447,7 +432,7 @@ mod async_queue_tests {
     #[tokio::test]
     async fn schedule_task_test() {
         let pool = pool().await;
-        let mut test = AsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::builder().pool(pool).build();
 
         let datetime = (Utc::now() + Duration::seconds(7)).round_subsecs(0);
 
@@ -472,7 +457,7 @@ mod async_queue_tests {
     #[tokio::test]
     async fn remove_all_scheduled_tasks_test() {
         let pool = pool().await;
-        let mut test = AsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::builder().pool(pool).build();
 
         let datetime = (Utc::now() + Duration::seconds(7)).round_subsecs(0);
 
@@ -499,7 +484,7 @@ mod async_queue_tests {
     #[tokio::test]
     async fn fetch_and_touch_test() {
         let pool = pool().await;
-        let mut test = AsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::builder().pool(pool).build();
 
         let task = insert_task(&mut test, &AsyncTask { number: 1 }).await;
 
@@ -519,11 +504,7 @@ mod async_queue_tests {
         assert_eq!(Some(2), number);
         assert_eq!(Some("AsyncTask"), type_task);
 
-        let task = test
-            .fetch_and_touch_task(None)
-            .await
-            .unwrap()
-            .unwrap();
+        let task = test.fetch_and_touch_task(None).await.unwrap().unwrap();
 
         let metadata = task.metadata.as_object().unwrap();
         let number = metadata["number"].as_u64();
@@ -532,11 +513,7 @@ mod async_queue_tests {
         assert_eq!(Some(1), number);
         assert_eq!(Some("AsyncTask"), type_task);
 
-        let task = test
-            .fetch_and_touch_task(None)
-            .await
-            .unwrap()
-            .unwrap();
+        let task = test.fetch_and_touch_task(None).await.unwrap().unwrap();
         let metadata = task.metadata.as_object().unwrap();
         let number = metadata["number"].as_u64();
         let type_task = metadata["type"].as_str();
@@ -550,7 +527,7 @@ mod async_queue_tests {
     #[tokio::test]
     async fn remove_tasks_type_test() {
         let pool = pool().await;
-        let mut test = AsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::builder().pool(pool).build();
 
         let task = insert_task(&mut test, &AsyncTask { number: 1 }).await;
 
@@ -582,7 +559,7 @@ mod async_queue_tests {
     #[tokio::test]
     async fn remove_tasks_by_metadata() {
         let pool = pool().await;
-        let mut test = AsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::builder().pool(pool).build();
 
         let task = insert_task(&mut test, &AsyncUniqTask { number: 1 }).await;
 
@@ -617,7 +594,7 @@ mod async_queue_tests {
         test.remove_all_tasks().await.unwrap();
     }
 
-    async fn insert_task(test: &mut AsyncQueue, task: &dyn AsyncRunnable) -> Task {
+    async fn insert_task(test: &mut PgAsyncQueue, task: &dyn AsyncRunnable) -> Task {
         test.insert_task(task).await.unwrap()
     }
 

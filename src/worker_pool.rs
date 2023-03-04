@@ -1,11 +1,9 @@
 use crate::queue::AsyncQueueable;
 use crate::task::DEFAULT_TASK_TYPE;
 use crate::worker::AsyncWorker;
-use crate::errors::FangError;
 use crate::{RetentionMode, SleepParams};
 use async_recursion::async_recursion;
 use log::error;
-use tokio::task::JoinHandle;
 use typed_builder::TypedBuilder;
 
 #[derive(TypedBuilder, Clone)]
@@ -46,13 +44,19 @@ where
     #[async_recursion]
     async fn supervise_task(pool: AsyncWorkerPool<AQueue>, restarts: u64, worker_number: u32) {
         let restarts = restarts + 1;
-        let join_handle = Self::spawn_worker(
-            pool.queue.clone(),
-            pool.sleep_params.clone(),
-            pool.retention_mode.clone(),
-            pool.task_type.clone(),
-        )
-        .await;
+
+        let inner_pool = pool.clone();
+
+        let join_handle = tokio::spawn(async move {
+            let mut worker: AsyncWorker<AQueue> = AsyncWorker::builder()
+                .queue(inner_pool.queue.clone())
+                .sleep_params(inner_pool.sleep_params.clone())
+                .retention_mode(inner_pool.retention_mode.clone())
+                .task_type(inner_pool.task_type.clone())
+                .build();
+
+            worker.run_tasks().await
+        });
 
         if (join_handle.await).is_err() {
             error!(
@@ -61,31 +65,5 @@ where
             );
             Self::supervise_task(pool, restarts, worker_number).await;
         }
-    }
-
-    async fn spawn_worker(
-        queue: AQueue,
-        sleep_params: SleepParams,
-        retention_mode: RetentionMode,
-        task_type: String,
-    ) -> JoinHandle<Result<(), FangError>> {
-        tokio::spawn(async move {
-            Self::run_worker(queue, sleep_params, retention_mode, task_type).await
-        })
-    }
-    async fn run_worker(
-        queue: AQueue,
-        sleep_params: SleepParams,
-        retention_mode: RetentionMode,
-        task_type: String,
-    ) -> Result<(), FangError> {
-        let mut worker: AsyncWorker<AQueue> = AsyncWorker::builder()
-            .queue(queue)
-            .sleep_params(sleep_params)
-            .retention_mode(retention_mode)
-            .task_type(task_type)
-            .build();
-
-        worker.run_tasks().await
     }
 }

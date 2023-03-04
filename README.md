@@ -23,6 +23,12 @@ Background task processing library for Rust. It uses Postgres DB as a task queue
  - Retries.
    Tasks can be retried with a custom backoff mode
 
+## Differences from original fang
+
+- Supports only async processing
+- Supports graceful shutdown
+- The connection pool for the queue is provided by the user
+
 ## Installation
 
 1. Add this to your Cargo.toml

@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 
-use std::time::Duration;
 use chrono::{DateTime, Utc};
+use std::time::Duration;
 use typed_builder::TypedBuilder;
 
 /// Represents a schedule for scheduled tasks.
@@ -80,12 +80,12 @@ impl Default for SleepParams {
     }
 }
 
+pub mod errors;
 pub mod fang_task_state;
+mod queries;
+pub mod queue;
+pub mod runnable;
 pub mod schema;
 pub mod task;
-pub mod queue;
-mod queries;
-pub mod errors;
-pub mod runnable;
 pub mod worker;
 pub mod worker_pool;

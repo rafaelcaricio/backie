@@ -1,4 +1,4 @@
-use fang::queue::AsyncQueue;
+use fang::queue::PgAsyncQueue;
 use fang::queue::AsyncQueueable;
 use fang::worker_pool::AsyncWorkerPool;
 use fang::runnable::AsyncRunnable;
@@ -25,13 +25,13 @@ async fn main() {
         .await
         .unwrap();
 
-    let mut queue = AsyncQueue::builder()
+    let mut queue = PgAsyncQueue::builder()
         .pool(pool)
         .build();
 
     log::info!("Queue connected...");
 
-    let mut workers_pool: AsyncWorkerPool<AsyncQueue> = AsyncWorkerPool::builder()
+    let mut workers_pool: AsyncWorkerPool<PgAsyncQueue> = AsyncWorkerPool::builder()
         .number_of_workers(10_u32)
         .queue(queue.clone())
         .build();
