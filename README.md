@@ -2,7 +2,7 @@
 
 [![Crates.io][s1]][ci] [![docs page][docs-badge]][docs] ![test][ga-test] ![style][ga-style]
 
-# Fang
+# Frango
 
 Background task processing library for Rust. It uses Postgres DB as a task queue.
 
