@@ -1,15 +1,34 @@
-use crate::queue::Queueable;
-use crate::FangError;
+use crate::errors::AsyncQueueError;
+use crate::queue::AsyncQueueable;
+use crate::errors::FangError;
 use crate::Scheduled;
+use async_trait::async_trait;
+use serde_json::Error as SerdeError;
 
-pub const COMMON_TYPE: &str = "common";
+const COMMON_TYPE: &str = "common";
 pub const RETRIES_NUMBER: i32 = 20;
+
+impl From<AsyncQueueError> for FangError {
+    fn from(error: AsyncQueueError) -> Self {
+        let message = format!("{error:?}");
+        FangError {
+            description: message,
+        }
+    }
+}
+
+impl From<SerdeError> for FangError {
+    fn from(error: SerdeError) -> Self {
+        Self::from(AsyncQueueError::SerdeError(error))
+    }
+}
 
 /// Implement this trait to run your custom tasks.
 #[typetag::serde(tag = "type")]
-pub trait Runnable {
+#[async_trait]
+pub trait AsyncRunnable: Send + Sync {
     /// Execute the task. This method should define its logic
-    fn run(&self, _queueable: &dyn Queueable) -> Result<(), FangError>;
+    async fn run(&self, client: &mut dyn AsyncQueueable) -> Result<(), FangError>;
 
     /// Define the type of the task.
     /// The `common` task type is used by default
@@ -26,14 +45,20 @@ pub trait Runnable {
     /// This method defines if a task is periodic or it should be executed once in the future.
     ///
     /// Be careful it works only with the UTC timezone.
+    ///
+    ///
+    /// Example:
+    ///
+    ///
     /**
     ```rust
-      fn cron(&self) -> Option<Scheduled> {
-          let expression = "0/20 * * * Aug-Sep * 2022/1";
-          Some(Scheduled::CronPattern(expression.to_string()))
-      }
-     ```
-     */
+     fn cron(&self) -> Option<Scheduled> {
+         let expression = "0/20 * * * Aug-Sep * 2022/1";
+         Some(Scheduled::CronPattern(expression.to_string()))
+     }
+    ```
+    */
+
     /// In order to schedule  a task once, use the `Scheduled::ScheduleOnce` enum variant.
     fn cron(&self) -> Option<Scheduled> {
         None

@@ -1,7 +1,7 @@
-use crate::asynk::async_queue::AsyncQueueable;
-use crate::asynk::async_queue::DEFAULT_TASK_TYPE;
-use crate::asynk::async_worker::AsyncWorker;
-use crate::FangError;
+use crate::queue::AsyncQueueable;
+use crate::task::DEFAULT_TASK_TYPE;
+use crate::worker::AsyncWorker;
+use crate::errors::FangError;
 use crate::{RetentionMode, SleepParams};
 use async_recursion::async_recursion;
 use log::error;

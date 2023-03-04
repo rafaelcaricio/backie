@@ -1,2 +1,2 @@
 [print_schema]
-file = "src/blocking/schema.rs"
+file = "src/schema.rs"

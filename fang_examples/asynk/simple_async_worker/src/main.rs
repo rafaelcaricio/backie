@@ -1,34 +1,44 @@
-use fang::asynk::async_queue::AsyncQueue;
-use fang::asynk::async_queue::AsyncQueueable;
-use fang::asynk::async_worker_pool::AsyncWorkerPool;
-use fang::AsyncRunnable;
-use fang::NoTls;
+use fang::queue::AsyncQueue;
+use fang::queue::AsyncQueueable;
+use fang::worker_pool::AsyncWorkerPool;
+use fang::runnable::AsyncRunnable;
 use simple_async_worker::MyFailingTask;
 use simple_async_worker::MyTask;
 use std::time::Duration;
+use diesel_async::pg::AsyncPgConnection;
+use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
+use diesel::PgConnection;
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
 
+    let connection_url = "postgres://postgres:password@localhost/fang";
+
     log::info!("Starting...");
     let max_pool_size: u32 = 3;
+    let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(connection_url);
+    let pool = Pool::builder()
+        .max_size(max_pool_size)
+        .min_idle(Some(1))
+        .build(manager)
+        .await
+        .unwrap();
+
     let mut queue = AsyncQueue::builder()
-        .uri("postgres://postgres:postgres@localhost/fang")
-        .max_pool_size(max_pool_size)
+        .pool(pool)
         .build();
 
-    queue.connect(NoTls).await.unwrap();
     log::info!("Queue connected...");
 
-    let mut pool: AsyncWorkerPool<AsyncQueue<NoTls>> = AsyncWorkerPool::builder()
+    let mut workers_pool: AsyncWorkerPool<AsyncQueue> = AsyncWorkerPool::builder()
         .number_of_workers(10_u32)
         .queue(queue.clone())
         .build();
 
     log::info!("Pool created ...");
 
-    pool.start().await;
+    workers_pool.start().await;
     log::info!("Workers started ...");
 
     let task1 = MyTask::new(0);

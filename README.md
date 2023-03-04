@@ -45,7 +45,7 @@ fang = { version = "0.10" , features = ["asynk"], default-features = false }
 fang = { version = "0.10" }
 ```
 
-*Supports rustc 1.62+*
+*Supports rustc 1.67+*
 
 2. Create the `fang_tasks` table in the Postgres database. The migration can be found in [the migrations directory](https://github.com/ayrat555/fang/blob/master/migrations/2022-08-20-151615_create_fang_tasks/up.sql).
 

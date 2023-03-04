@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 use std::time::Duration;
-use thiserror::Error;
+use chrono::{DateTime, Utc};
 use typed_builder::TypedBuilder;
 
 /// Represents a schedule for scheduled tasks.
@@ -17,20 +17,6 @@ pub enum Scheduled {
     ///
     /// For example, `Scheduled::ScheduleOnce(chrono::Utc::now() + std::time::Duration::seconds(7i64))`
     ScheduleOnce(DateTime<Utc>),
-}
-
-/// List of error types that can occur while working with cron schedules.
-#[derive(Debug, Error)]
-pub enum CronError {
-    /// A problem occured during cron schedule parsing.
-    #[error(transparent)]
-    LibraryError(#[from] cron::error::Error),
-    /// [`Scheduled`] enum variant is not provided
-    #[error("You have to implement method `cron()` in your AsyncRunnable")]
-    TaskNotSchedulableError,
-    /// The next execution can not be determined using the current [`Scheduled::CronPattern`]
-    #[error("No timestamps match with this cron pattern")]
-    NoTimestampsError,
 }
 
 /// All possible options for retaining tasks in the db after their execution.
@@ -94,54 +80,12 @@ impl Default for SleepParams {
     }
 }
 
-/// An error that can happen during executing of tasks
-#[derive(Debug)]
-pub struct FangError {
-    /// A description of an error
-    pub description: String,
-}
-
-#[doc(hidden)]
-#[cfg(feature = "blocking")]
-extern crate diesel;
-
-#[doc(hidden)]
-#[cfg(feature = "blocking")]
-pub use diesel::pg::PgConnection;
-
-#[doc(hidden)]
-pub use typetag;
-
-#[doc(hidden)]
-pub extern crate serde;
-
-#[doc(hidden)]
-pub extern crate chrono;
-
-#[doc(hidden)]
-pub use serde_derive::{Deserialize, Serialize};
-
-#[doc(hidden)]
-pub use chrono::DateTime;
-#[doc(hidden)]
-pub use chrono::Utc;
-
-#[cfg(feature = "blocking")]
-pub mod blocking;
-
-#[cfg(feature = "blocking")]
-pub use blocking::*;
-
-#[cfg(feature = "asynk")]
-pub mod asynk;
-
-#[cfg(feature = "asynk")]
-pub use asynk::*;
-
-#[cfg(feature = "asynk")]
-#[doc(hidden)]
-pub use bb8_postgres::tokio_postgres::tls::NoTls;
-
-#[cfg(feature = "asynk")]
-#[doc(hidden)]
-pub use async_trait::async_trait;
+pub mod fang_task_state;
+pub mod schema;
+pub mod task;
+pub mod queue;
+mod queries;
+pub mod errors;
+pub mod runnable;
+pub mod worker;
+pub mod worker_pool;

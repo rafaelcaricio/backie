@@ -1,23 +1,20 @@
 [package]
 name = "fang"
 version = "0.10.2"
-authors = ["Ayrat Badykov <ayratin555@gmail.com>" , "Pepe Márquez <pepe.marquezromero@gmail.com>"]
+authors = [
+    "Ayrat Badykov <ayratin555@gmail.com>",
+    "Pepe Márquez <pepe.marquezromero@gmail.com>",
+    "Rafael Caricio <rafael@caricio.com>"
+]
 description = "Background job processing library for Rust"
-repository = "https://github.com/ayrat555/fang"
+repository = "https://github.com/rafaelcaricio/fang"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
-rust-version = "1.62"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+rust-version = "1.67"
 
 [lib]
 doctest = false
-
-[features]
-default = ["blocking", "asynk"]
-blocking = ["diesel", "diesel-derive-enum", "dotenvy"]
-asynk = ["bb8-postgres",  "postgres-types", "tokio", "async-trait", "async-recursion"]
 
 [dependencies]
 cron = "0.12"
@@ -36,36 +33,21 @@ uuid = { version = "1.1", features = ["v4"] }
 [dependencies.diesel]
 version = "2.0"
 features = ["postgres", "serde_json", "chrono", "uuid", "r2d2"]
-optional = true
 
 [dependencies.diesel-derive-enum]
 version = "2.0.1"
 features = ["postgres"]
-optional = true
 
-[dependencies.dotenvy]
-version = "0.15"
-optional = true
-
-[dependencies.bb8-postgres]
-version = "0.8"
-features = ["with-serde_json-1" , "with-uuid-1" , "with-chrono-0_4"]
-optional = true
-
-[dependencies.postgres-types]
-version = "0.X.X"
-features = ["derive"]
-optional = true
+[dependencies.diesel-async]
+version = "0.2"
+features = ["postgres", "bb8"]
 
 [dependencies.tokio]
 version = "1.25"
 features = ["rt", "time", "macros"]
-optional = true
 
 [dependencies.async-trait]
 version = "0.1"
-optional = true
 
 [dependencies.async-recursion]
 version = "1"
-optional = true
