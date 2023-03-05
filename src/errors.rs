@@ -3,21 +3,21 @@ use thiserror::Error;
 
 /// An error that can happen during executing of tasks
 #[derive(Debug)]
-pub struct FangError {
+pub struct FrangoError {
     /// A description of an error
     pub description: String,
 }
 
-impl From<AsyncQueueError> for FangError {
+impl From<AsyncQueueError> for FrangoError {
     fn from(error: AsyncQueueError) -> Self {
         let message = format!("{error:?}");
-        FangError {
+        FrangoError {
             description: message,
         }
     }
 }
 
-impl From<SerdeError> for FangError {
+impl From<SerdeError> for FrangoError {
     fn from(error: SerdeError) -> Self {
         Self::from(AsyncQueueError::SerdeError(error))
     }
@@ -45,14 +45,6 @@ pub enum AsyncQueueError {
     SerdeError(#[from] serde_json::Error),
     #[error(transparent)]
     CronError(#[from] CronError),
-    #[error("returned invalid result (expected {expected:?}, found {found:?})")]
-    ResultError { expected: u64, found: u64 },
-    #[error(
-        "AsyncQueue is not connected :( , call connect() method first and then perform operations"
-    )]
-    NotConnectedError,
-    #[error("Can not convert `std::time::Duration` to `chrono::Duration`")]
-    TimeError,
     #[error("Can not perform this operation if task is not uniq, please check its definition in impl AsyncRunnable")]
     TaskNotUniqError,
 }

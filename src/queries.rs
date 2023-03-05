@@ -14,14 +14,22 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 impl Task {
-    pub async fn remove_all_scheduled_tasks(
+    pub async fn remove_all(
+        connection: &mut AsyncPgConnection,
+    ) -> Result<u64, AsyncQueueError> {
+        Ok(diesel::delete(fang_tasks::table)
+            .execute(connection)
+            .await? as u64)
+    }
+
+    pub async fn remove_all_scheduled(
         connection: &mut AsyncPgConnection,
     ) -> Result<u64, AsyncQueueError> {
         let query = fang_tasks::table.filter(fang_tasks::scheduled_at.gt(Utc::now()));
         Ok(diesel::delete(query).execute(connection).await? as u64)
     }
 
-    pub async fn remove_task(
+    pub async fn remove(
         connection: &mut AsyncPgConnection,
         id: Uuid,
     ) -> Result<u64, AsyncQueueError> {
@@ -29,7 +37,7 @@ impl Task {
         Ok(diesel::delete(query).execute(connection).await? as u64)
     }
 
-    pub async fn remove_task_by_metadata(
+    pub async fn remove_by_metadata(
         connection: &mut AsyncPgConnection,
         task: &dyn AsyncRunnable,
     ) -> Result<u64, AsyncQueueError> {
@@ -42,7 +50,7 @@ impl Task {
         Ok(diesel::delete(query).execute(connection).await? as u64)
     }
 
-    pub async fn remove_tasks_type(
+    pub async fn remove_by_type(
         connection: &mut AsyncPgConnection,
         task_type: &str,
     ) -> Result<u64, AsyncQueueError> {
@@ -50,7 +58,7 @@ impl Task {
         Ok(diesel::delete(query).execute(connection).await? as u64)
     }
 
-    pub async fn find_task_by_id(
+    pub async fn find_by_id(
         connection: &mut AsyncPgConnection,
         id: Uuid,
     ) -> Result<Task, AsyncQueueError> {
@@ -61,7 +69,7 @@ impl Task {
         Ok(task)
     }
 
-    pub async fn fail_task(
+    pub async fn fail_with_message(
         connection: &mut AsyncPgConnection,
         task: Task,
         error_message: &str,
@@ -99,7 +107,7 @@ impl Task {
         Ok(task)
     }
 
-    pub async fn fetch_task_of_type(
+    pub async fn fetch_by_type(
         connection: &mut AsyncPgConnection,
         task_type: Option<String>,
     ) -> Option<Task> {
@@ -120,7 +128,7 @@ impl Task {
             .ok()
     }
 
-    pub async fn update_task_state(
+    pub async fn update_state(
         connection: &mut AsyncPgConnection,
         task: Task,
         state: FangTaskState,
@@ -135,7 +143,7 @@ impl Task {
             .await?)
     }
 
-    pub async fn insert_task(
+    pub async fn insert(
         connection: &mut AsyncPgConnection,
         params: &dyn AsyncRunnable,
         scheduled_at: DateTime<Utc>,
@@ -157,7 +165,7 @@ impl Task {
 
             let uniq_hash = Self::calculate_hash(metadata.to_string());
 
-            match Self::find_task_by_uniq_hash(connection, &uniq_hash).await {
+            match Self::find_by_uniq_hash(connection, &uniq_hash).await {
                 Some(task) => Ok(task),
                 None => {
                     let new_task = NewTask::builder()
@@ -183,7 +191,7 @@ impl Task {
         hex::encode(result)
     }
 
-    pub async fn find_task_by_uniq_hash(
+    pub async fn find_by_uniq_hash(
         connection: &mut AsyncPgConnection,
         uniq_hash: &str,
     ) -> Option<Task> {

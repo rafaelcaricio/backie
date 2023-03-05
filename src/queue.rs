@@ -2,7 +2,6 @@ use crate::errors::AsyncQueueError;
 use crate::errors::CronError;
 use crate::fang_task_state::FangTaskState;
 use crate::runnable::AsyncRunnable;
-use crate::schema::fang_tasks;
 use crate::task::Task;
 use crate::Scheduled::*;
 use async_trait::async_trait;
@@ -11,7 +10,7 @@ use cron::Schedule;
 use diesel::result::Error::QueryBuilderError;
 use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::AsyncConnection;
-use diesel_async::{pg::AsyncPgConnection, pooled_connection::bb8::Pool, RunQueryDsl};
+use diesel_async::{pg::AsyncPgConnection, pooled_connection::bb8::Pool};
 use std::str::FromStr;
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
@@ -103,7 +102,7 @@ impl AsyncQueueable for PgAsyncQueue {
             .get()
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
-        Task::find_task_by_id(&mut connection, id).await
+        Task::find_by_id(&mut connection, id).await
     }
 
     async fn fetch_and_touch_task(
@@ -118,11 +117,11 @@ impl AsyncQueueable for PgAsyncQueue {
         connection
             .transaction::<Option<Task>, AsyncQueueError, _>(|conn| {
                 async move {
-                    let Some(found_task) = Task::fetch_task_of_type(conn, task_type).await else {
+                    let Some(found_task) = Task::fetch_by_type(conn, task_type).await else {
                         return Ok(None);
                     };
 
-                    match Task::update_task_state(conn, found_task, FangTaskState::InProgress).await
+                    match Task::update_state(conn, found_task, FangTaskState::InProgress).await
                     {
                         Ok(updated_task) => Ok(Some(updated_task)),
                         Err(err) => Err(err),
@@ -139,7 +138,7 @@ impl AsyncQueueable for PgAsyncQueue {
             .get()
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
-        Ok(Task::insert_task(&mut connection, task, Utc::now()).await?)
+        Ok(Task::insert(&mut connection, task, Utc::now()).await?)
     }
 
     async fn schedule_task(&mut self, task: &dyn AsyncRunnable) -> Result<Task, AsyncQueueError> {
@@ -166,7 +165,7 @@ impl AsyncQueueable for PgAsyncQueue {
             }
         };
 
-        Ok(Task::insert_task(&mut connection, task, scheduled_at).await?)
+        Ok(Task::insert(&mut connection, task, scheduled_at).await?)
     }
 
     async fn remove_all_tasks(&mut self) -> Result<u64, AsyncQueueError> {
@@ -175,10 +174,7 @@ impl AsyncQueueable for PgAsyncQueue {
             .get()
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
-
-        Ok(diesel::delete(fang_tasks::table)
-            .execute(&mut connection)
-            .await? as u64)
+        Task::remove_all(&mut connection).await
     }
 
     async fn remove_all_scheduled_tasks(&mut self) -> Result<u64, AsyncQueueError> {
@@ -187,7 +183,7 @@ impl AsyncQueueable for PgAsyncQueue {
             .get()
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
-        let result = Task::remove_all_scheduled_tasks(&mut connection).await?;
+        let result = Task::remove_all_scheduled(&mut connection).await?;
         Ok(result)
     }
 
@@ -197,7 +193,7 @@ impl AsyncQueueable for PgAsyncQueue {
             .get()
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
-        let result = Task::remove_task(&mut connection, id).await?;
+        let result = Task::remove(&mut connection, id).await?;
         Ok(result)
     }
 
@@ -211,7 +207,7 @@ impl AsyncQueueable for PgAsyncQueue {
                 .get()
                 .await
                 .map_err(|e| QueryBuilderError(e.into()))?;
-            let result = Task::remove_task_by_metadata(&mut connection, task).await?;
+            let result = Task::remove_by_metadata(&mut connection, task).await?;
             Ok(result)
         } else {
             Err(AsyncQueueError::TaskNotUniqError)
@@ -224,7 +220,7 @@ impl AsyncQueueable for PgAsyncQueue {
             .get()
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
-        let result = Task::remove_tasks_type(&mut connection, task_type).await?;
+        let result = Task::remove_by_type(&mut connection, task_type).await?;
         Ok(result)
     }
 
@@ -238,7 +234,7 @@ impl AsyncQueueable for PgAsyncQueue {
             .get()
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
-        let task = Task::update_task_state(&mut connection, task, state).await?;
+        let task = Task::update_state(&mut connection, task, state).await?;
         Ok(task)
     }
 
@@ -252,7 +248,7 @@ impl AsyncQueueable for PgAsyncQueue {
             .get()
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
-        let task = Task::fail_task(&mut connection, task, error_message).await?;
+        let task = Task::fail_with_message(&mut connection, task, error_message).await?;
         Ok(task)
     }
 
@@ -275,7 +271,7 @@ impl AsyncQueueable for PgAsyncQueue {
 #[cfg(test)]
 mod async_queue_tests {
     use super::*;
-    use crate::errors::FangError;
+    use crate::errors::FrangoError;
     use crate::Scheduled;
     use async_trait::async_trait;
     use chrono::prelude::*;
@@ -294,7 +290,7 @@ mod async_queue_tests {
     #[typetag::serde]
     #[async_trait]
     impl AsyncRunnable for AsyncTask {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
             Ok(())
         }
     }
@@ -307,7 +303,7 @@ mod async_queue_tests {
     #[typetag::serde]
     #[async_trait]
     impl AsyncRunnable for AsyncUniqTask {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
             Ok(())
         }
 
@@ -325,7 +321,7 @@ mod async_queue_tests {
     #[typetag::serde]
     #[async_trait]
     impl AsyncRunnable for AsyncTaskSchedule {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
             Ok(())
         }
 

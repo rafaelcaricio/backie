@@ -1,4 +1,4 @@
-use crate::errors::FangError;
+use crate::errors::FrangoError;
 use crate::fang_task_state::FangTaskState;
 use crate::queue::AsyncQueueable;
 use crate::runnable::AsyncRunnable;
@@ -29,7 +29,7 @@ impl<AQueue> AsyncWorker<AQueue>
 where
     AQueue: AsyncQueueable + Clone + Sync + 'static,
 {
-    async fn run(&mut self, task: Task, runnable: Box<dyn AsyncRunnable>) -> Result<(), FangError> {
+    async fn run(&mut self, task: Task, runnable: Box<dyn AsyncRunnable>) -> Result<(), FrangoError> {
         let result = runnable.run(&mut self.queue).await;
 
         match result {
@@ -54,8 +54,8 @@ where
     async fn finalize_task(
         &mut self,
         task: Task,
-        result: &Result<(), FangError>,
-    ) -> Result<(), FangError> {
+        result: &Result<(), FrangoError>,
+    ) -> Result<(), FrangoError> {
         match self.retention_mode {
             RetentionMode::KeepAll => match result {
                 Ok(_) => {
@@ -89,7 +89,7 @@ where
         tokio::time::sleep(self.sleep_params.sleep_period).await;
     }
 
-    pub(crate) async fn run_tasks(&mut self) -> Result<(), FangError> {
+    pub(crate) async fn run_tasks(&mut self) -> Result<(), FrangoError> {
         loop {
             //fetch task
             match self
@@ -124,7 +124,7 @@ where
     }
 
     #[cfg(test)]
-    pub async fn run_tasks_until_none(&mut self) -> Result<(), FangError> {
+    pub async fn run_tasks_until_none(&mut self) -> Result<(), FrangoError> {
         loop {
             match self
                 .queue
@@ -160,7 +160,7 @@ where
 #[cfg(test)]
 mod async_worker_tests {
     use super::*;
-    use crate::errors::FangError;
+    use crate::errors::FrangoError;
     use crate::queue::AsyncQueueable;
     use crate::queue::PgAsyncQueue;
     use crate::worker::Task;
@@ -181,7 +181,7 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl AsyncRunnable for WorkerAsyncTask {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
             Ok(())
         }
     }
@@ -194,7 +194,7 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl AsyncRunnable for WorkerAsyncTaskSchedule {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
             Ok(())
         }
         fn cron(&self) -> Option<Scheduled> {
@@ -210,10 +210,10 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl AsyncRunnable for AsyncFailedTask {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
             let message = format!("number {} is wrong :(", self.number);
 
-            Err(FangError {
+            Err(FrangoError {
                 description: message,
             })
         }
@@ -229,10 +229,10 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl AsyncRunnable for AsyncRetryTask {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
             let message = "Failed".to_string();
 
-            Err(FangError {
+            Err(FrangoError {
                 description: message,
             })
         }
@@ -248,7 +248,7 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl AsyncRunnable for AsyncTaskType1 {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
             Ok(())
         }
 
@@ -263,7 +263,7 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl AsyncRunnable for AsyncTaskType2 {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FangError> {
+        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
             Ok(())
         }
 

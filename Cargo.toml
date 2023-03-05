@@ -1,13 +1,11 @@
 [package]
-name = "fang"
-version = "0.10.2"
+name = "frango"
+version = "0.1.0"
 authors = [
-    "Ayrat Badykov <ayratin555@gmail.com>",
-    "Pepe Márquez <pepe.marquezromero@gmail.com>",
-    "Rafael Caricio <rafael@caricio.com>"
+    "Rafael Caricio <rafael@caricio.com>",
 ]
-description = "Background job processing library for Rust"
-repository = "https://github.com/rafaelcaricio/fang"
+description = "Async background job processing library with Diesel and Tokio"
+repository = "https://code.caric.io/rafaelcaricio/frango"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -29,25 +27,9 @@ thiserror = "1.0"
 typed-builder = "0.12"
 typetag = "0.2"
 uuid = { version = "1.1", features = ["v4"] }
-
-[dependencies.diesel]
-version = "2.0"
-features = ["postgres", "serde_json", "chrono", "uuid", "r2d2"]
-
-[dependencies.diesel-derive-enum]
-version = "2.0.1"
-features = ["postgres"]
-
-[dependencies.diesel-async]
-version = "0.2"
-features = ["postgres", "bb8"]
-
-[dependencies.tokio]
-version = "1.25"
-features = ["rt", "time", "macros"]
-
-[dependencies.async-trait]
-version = "0.1"
-
-[dependencies.async-recursion]
-version = "1"
+async-trait = "0.1"
+async-recursion = "1"
+diesel = { version = "2.0", features = ["postgres", "serde_json", "chrono", "uuid"] }
+diesel-derive-enum = { version = "2.0.1", features = ["postgres"] }
+diesel-async = { version = "0.2", features = ["postgres", "bb8"] }
+tokio = { version = "1.25", features = ["rt", "time", "macros"] }

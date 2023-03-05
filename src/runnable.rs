@@ -1,4 +1,4 @@
-use crate::errors::FangError;
+use crate::errors::FrangoError;
 use crate::queue::AsyncQueueable;
 use crate::Scheduled;
 use async_trait::async_trait;
@@ -10,7 +10,7 @@ pub const RETRIES_NUMBER: i32 = 20;
 #[async_trait]
 pub trait AsyncRunnable: Send + Sync {
     /// Execute the task. This method should define its logic
-    async fn run(&self, client: &mut dyn AsyncQueueable) -> Result<(), FangError>;
+    async fn run(&self, client: &mut dyn AsyncQueueable) -> Result<(), FrangoError>;
 
     /// Define the type of the task.
     /// The `common` task type is used by default

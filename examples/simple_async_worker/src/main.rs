@@ -7,7 +7,6 @@ use simple_async_worker::MyTask;
 use std::time::Duration;
 use diesel_async::pg::AsyncPgConnection;
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
-use diesel::PgConnection;
 
 #[tokio::main]
 async fn main() {
