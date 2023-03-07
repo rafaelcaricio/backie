@@ -1,11 +1,11 @@
-use std::error::Error;
 use crate::errors::BackieError;
 use crate::queue::Queueable;
 use crate::runnable::RunnableTask;
 use crate::task::{Task, TaskType};
+use crate::RetentionMode;
 use crate::Scheduled::*;
-use crate::{RetentionMode};
 use log::error;
+use std::error::Error;
 use typed_builder::TypedBuilder;
 
 /// it executes tasks only of task_type type, it sleeps when there are no tasks in the queue
@@ -41,7 +41,11 @@ impl<Q> AsyncWorker<Q>
 where
     Q: Queueable + Clone + Sync + 'static,
 {
-    async fn run(&mut self, task: Task, runnable: Box<dyn RunnableTask>) -> Result<(), BackieError> {
+    async fn run(
+        &mut self,
+        task: Task,
+        runnable: Box<dyn RunnableTask>,
+    ) -> Result<(), BackieError> {
         // TODO: catch panics
         let result = runnable.run(&mut self.queue).await;
         match result {
@@ -81,7 +85,9 @@ where
                 }
                 Err(error) => {
                     log::debug!("Task {} failed and kept in the database", task.id);
-                    self.queue.set_task_failed(task.id, &format!("{}", error)).await?;
+                    self.queue
+                        .set_task_failed(task.id, &format!("{}", error))
+                        .await?;
                 }
             },
             RetentionMode::RemoveAll => {
@@ -95,7 +101,9 @@ where
                 }
                 Err(error) => {
                     log::debug!("Task {} failed and kept in the database", task.id);
-                    self.queue.set_task_failed(task.id, &format!("{}", error)).await?;
+                    self.queue
+                        .set_task_failed(task.id, &format!("{}", error))
+                        .await?;
                 }
             },
         };
@@ -118,13 +126,10 @@ where
     pub(crate) async fn run_tasks(&mut self) {
         loop {
             // TODO: check if should stop the worker
-            match self
-                .queue
-                .pull_next_task(self.task_type.clone())
-                .await
-            {
+            match self.queue.pull_next_task(self.task_type.clone()).await {
                 Ok(Some(task)) => {
-                    let actual_task: Box<dyn RunnableTask> = serde_json::from_value(task.payload.clone()).unwrap();
+                    let actual_task: Box<dyn RunnableTask> =
+                        serde_json::from_value(task.payload.clone()).unwrap();
 
                     // check if task is scheduled or not
                     if let Some(CronPattern(_)) = actual_task.cron() {
@@ -150,11 +155,7 @@ where
     #[cfg(test)]
     pub async fn run_tasks_until_none(&mut self) -> Result<(), BackieError> {
         loop {
-            match self
-                .queue
-                .pull_next_task(self.task_type.clone())
-                .await
-            {
+            match self.queue.pull_next_task(self.task_type.clone()).await {
                 Ok(Some(task)) => {
                     let actual_task: Box<dyn RunnableTask> =
                         serde_json::from_value(task.payload.clone()).unwrap();
@@ -185,8 +186,9 @@ where
 mod async_worker_tests {
     use super::*;
     use crate::errors::BackieError;
-    use crate::queue::Queueable;
     use crate::queue::PgAsyncQueue;
+    use crate::queue::Queueable;
+    use crate::task::TaskState;
     use crate::worker::Task;
     use crate::RetentionMode;
     use crate::Scheduled;
@@ -196,7 +198,6 @@ mod async_worker_tests {
     use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
     use diesel_async::AsyncPgConnection;
     use serde::{Deserialize, Serialize};
-    use crate::task::TaskState;
 
     #[derive(Serialize, Deserialize)]
     struct WorkerAsyncTask {
@@ -206,7 +207,10 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl RunnableTask for WorkerAsyncTask {
-        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
+        async fn run(
+            &self,
+            _queueable: &mut dyn Queueable,
+        ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
     }
@@ -219,7 +223,10 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl RunnableTask for WorkerAsyncTaskSchedule {
-        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
+        async fn run(
+            &self,
+            _queueable: &mut dyn Queueable,
+        ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
         fn cron(&self) -> Option<Scheduled> {
@@ -235,7 +242,10 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl RunnableTask for AsyncFailedTask {
-        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
+        async fn run(
+            &self,
+            _queueable: &mut dyn Queueable,
+        ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             let message = format!("number {} is wrong :(", self.number);
 
             Err(Box::new(BackieError {
@@ -254,7 +264,10 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl RunnableTask for AsyncRetryTask {
-        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
+        async fn run(
+            &self,
+            _queueable: &mut dyn Queueable,
+        ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             let message = "Failed".to_string();
 
             Err(Box::new(BackieError {
@@ -273,12 +286,15 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl RunnableTask for AsyncTaskType1 {
-        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
+        async fn run(
+            &self,
+            _queueable: &mut dyn Queueable,
+        ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
 
         fn task_type(&self) -> TaskType {
-            TaskType::from("type1")
+            "type1".into()
         }
     }
 
@@ -288,7 +304,10 @@ mod async_worker_tests {
     #[typetag::serde]
     #[async_trait]
     impl RunnableTask for AsyncTaskType2 {
-        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
+        async fn run(
+            &self,
+            _queueable: &mut dyn Queueable,
+        ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
 
@@ -324,33 +343,33 @@ mod async_worker_tests {
     // async fn schedule_task_test() {
     //     let pool = pool().await;
     //     let mut test = PgAsyncQueue::new(pool);
-    // 
+    //
     //     let actual_task = WorkerAsyncTaskSchedule { number: 1 };
-    // 
+    //
     //     let task = test.schedule_task(&actual_task).await.unwrap();
-    // 
+    //
     //     let id = task.id;
-    // 
+    //
     //     let mut worker = AsyncWorker::<PgAsyncQueue>::builder()
     //         .queue(test.clone())
     //         .retention_mode(RetentionMode::KeepAll)
     //         .build();
-    // 
+    //
     //     worker.run_tasks_until_none().await.unwrap();
-    // 
+    //
     //     let task = worker.queue.find_task_by_id(id).await.unwrap();
-    // 
+    //
     //     assert_eq!(id, task.id);
     //     assert_eq!(TaskState::Ready, task.state());
-    // 
+    //
     //     tokio::time::sleep(core::time::Duration::from_secs(3)).await;
-    // 
+    //
     //     worker.run_tasks_until_none().await.unwrap();
-    // 
+    //
     //     let task = test.find_task_by_id(id).await.unwrap();
     //     assert_eq!(id, task.id);
     //     assert_eq!(TaskState::Done, task.state());
-    // 
+    //
     //     test.remove_all_tasks().await.unwrap();
     // }
 

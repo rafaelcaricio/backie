@@ -1,8 +1,8 @@
 use crate::errors::AsyncQueueError;
 use crate::runnable::RunnableTask;
 use crate::schema::backie_tasks;
-use crate::task::{NewTask, TaskId, TaskType, TaskHash};
 use crate::task::Task;
+use crate::task::{NewTask, TaskHash, TaskId, TaskType};
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
@@ -124,9 +124,7 @@ impl Task {
         task: Task,
     ) -> Result<Task, AsyncQueueError> {
         Ok(diesel::update(&task)
-            .set((
-                backie_tasks::running_at.eq(Utc::now()),
-            ))
+            .set((backie_tasks::running_at.eq(Utc::now()),))
             .get_result::<Task>(connection)
             .await?)
     }
@@ -135,17 +133,17 @@ impl Task {
         connection: &mut AsyncPgConnection,
         id: TaskId,
     ) -> Result<Task, AsyncQueueError> {
-        Ok(diesel::update(backie_tasks::table.filter(backie_tasks::id.eq(id)))
-            .set((
-                backie_tasks::done_at.eq(Utc::now()),
-            ))
-            .get_result::<Task>(connection)
-            .await?)
+        Ok(
+            diesel::update(backie_tasks::table.filter(backie_tasks::id.eq(id)))
+                .set((backie_tasks::done_at.eq(Utc::now()),))
+                .get_result::<Task>(connection)
+                .await?,
+        )
     }
 
     pub(crate) async fn insert(
         connection: &mut AsyncPgConnection,
-        runnable: &dyn RunnableTask
+        runnable: &dyn RunnableTask,
     ) -> Result<Task, AsyncQueueError> {
         let payload = serde_json::to_value(runnable)?;
         match runnable.uniq() {
@@ -161,23 +159,21 @@ impl Task {
                     .get_result::<Task>(connection)
                     .await?)
             }
-            Some(hash) => {
-                match Self::find_by_uniq_hash(connection, hash.clone()).await {
-                    Some(task) => Ok(task),
-                    None => {
-                        let new_task = NewTask::builder()
-                            .uniq_hash(Some(hash))
-                            .task_type(runnable.task_type())
-                            .payload(payload)
-                            .build();
+            Some(hash) => match Self::find_by_uniq_hash(connection, hash.clone()).await {
+                Some(task) => Ok(task),
+                None => {
+                    let new_task = NewTask::builder()
+                        .uniq_hash(Some(hash))
+                        .task_type(runnable.task_type())
+                        .payload(payload)
+                        .build();
 
-                        Ok(diesel::insert_into(backie_tasks::table)
-                            .values(new_task)
-                            .get_result::<Task>(connection)
-                            .await?)
-                    }
+                    Ok(diesel::insert_into(backie_tasks::table)
+                        .values(new_task)
+                        .get_result::<Task>(connection)
+                        .await?)
                 }
-            }
+            },
         }
     }
 

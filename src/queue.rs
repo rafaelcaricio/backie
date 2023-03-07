@@ -1,6 +1,6 @@
 use crate::errors::AsyncQueueError;
 use crate::runnable::RunnableTask;
-use crate::task::{Task, TaskId, TaskType, TaskHash};
+use crate::task::{Task, TaskHash, TaskId, TaskType};
 use async_trait::async_trait;
 use diesel::result::Error::QueryBuilderError;
 use diesel_async::scoped_futures::ScopedFutureExt;
@@ -16,7 +16,10 @@ pub trait Queueable: Send {
     ///
     /// This method returns one task of the `task_type` type. If `task_type` is `None` it will try to
     /// fetch a task of the type `common`. The returned task is marked as running and must be executed.
-    async fn pull_next_task(&mut self, kind: Option<TaskType>) -> Result<Option<Task>, AsyncQueueError>;
+    async fn pull_next_task(
+        &mut self,
+        kind: Option<TaskType>,
+    ) -> Result<Option<Task>, AsyncQueueError>;
 
     /// Enqueue a task to the queue, The task will be executed as soon as possible by the worker of the same type
     /// created by an AsyncWorkerPool.
@@ -26,7 +29,11 @@ pub trait Queueable: Send {
     async fn find_task_by_id(&mut self, id: TaskId) -> Result<Task, AsyncQueueError>;
 
     /// Update the state of a task to failed and set an error_message.
-    async fn set_task_failed(&mut self, id: TaskId, error_message: &str) -> Result<Task, AsyncQueueError>;
+    async fn set_task_failed(
+        &mut self,
+        id: TaskId,
+        error_message: &str,
+    ) -> Result<Task, AsyncQueueError>;
 
     /// Update the state of a task to done.
     async fn set_task_done(&mut self, id: TaskId) -> Result<Task, AsyncQueueError>;
@@ -57,18 +64,7 @@ pub trait Queueable: Send {
     ) -> Result<Task, AsyncQueueError>;
 }
 
-/// An async queue that can be used to enqueue tasks.
-/// It uses a PostgreSQL storage. It must be connected to perform any operation.
-/// To connect an `AsyncQueue` to PostgreSQL database call the `connect` method.
-/// A Queue can be created with the TypedBuilder.
-///
-///    ```rust
-///         let mut queue = AsyncQueue::builder()
-///             .uri("postgres://postgres:postgres@localhost/fang")
-///             .max_pool_size(max_pool_size)
-///             .build();
-///     ```
-///
+/// An async queue that is used to manipulate tasks, it uses PostgreSQL as storage.
 #[derive(Debug, Clone)]
 pub struct PgAsyncQueue {
     pool: Pool<AsyncPgConnection>,
@@ -98,7 +94,7 @@ impl Queueable for PgAsyncQueue {
                         return Ok(None);
                     };
 
-                    Task::set_running(conn, pending_task).await.map(|running_task| Some(running_task))
+                    Task::set_running(conn, pending_task).await.map(Some)
                 }
                 .scope_boxed()
             })
@@ -157,8 +153,10 @@ impl Queueable for PgAsyncQueue {
                     let task = Task::find_by_id(conn, id).await?;
                     Task::set_running(conn, task).await?;
                     Ok(())
-                }.scope_boxed()
-            }).await
+                }
+                .scope_boxed()
+            })
+            .await
     }
 
     async fn remove_task(&mut self, id: TaskId) -> Result<u64, AsyncQueueError> {
@@ -228,6 +226,7 @@ impl Queueable for PgAsyncQueue {
 #[cfg(test)]
 mod async_queue_tests {
     use super::*;
+    use crate::task::TaskState;
     use crate::Scheduled;
     use async_trait::async_trait;
     use chrono::DateTime;
@@ -235,7 +234,6 @@ mod async_queue_tests {
     use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
     use diesel_async::AsyncPgConnection;
     use serde::{Deserialize, Serialize};
-    use crate::task::TaskState;
 
     #[derive(Serialize, Deserialize)]
     struct AsyncTask {
@@ -245,7 +243,10 @@ mod async_queue_tests {
     #[typetag::serde]
     #[async_trait]
     impl RunnableTask for AsyncTask {
-        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
+        async fn run(
+            &self,
+            _queueable: &mut dyn Queueable,
+        ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
     }
@@ -258,7 +259,10 @@ mod async_queue_tests {
     #[typetag::serde]
     #[async_trait]
     impl RunnableTask for AsyncUniqTask {
-        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
+        async fn run(
+            &self,
+            _queueable: &mut dyn Queueable,
+        ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
 
@@ -276,7 +280,10 @@ mod async_queue_tests {
     #[typetag::serde]
     #[async_trait]
     impl RunnableTask for AsyncTaskSchedule {
-        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
+        async fn run(
+            &self,
+            _queueable: &mut dyn Queueable,
+        ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
 
@@ -495,7 +502,10 @@ mod async_queue_tests {
         assert_eq!(Some(2), number);
         assert_eq!(Some("AsyncTask"), type_task);
 
-        let result = test.remove_tasks_type(TaskType::from("nonexistentType")).await.unwrap();
+        let result = test
+            .remove_tasks_type(TaskType::from("nonexistentType"))
+            .await
+            .unwrap();
         assert_eq!(0, result);
 
         let result = test.remove_tasks_type(TaskType::default()).await.unwrap();
@@ -509,7 +519,10 @@ mod async_queue_tests {
         let pool = pool().await;
         let mut test = PgAsyncQueue::new(pool);
 
-        let task = test.create_task(&AsyncUniqTask { number: 1 }).await.unwrap();
+        let task = test
+            .create_task(&AsyncUniqTask { number: 1 })
+            .await
+            .unwrap();
 
         let metadata = task.payload.as_object().unwrap();
         let number = metadata["number"].as_u64();
@@ -518,7 +531,10 @@ mod async_queue_tests {
         assert_eq!(Some(1), number);
         assert_eq!(Some("AsyncUniqTask"), type_task);
 
-        let task = test.create_task(&AsyncUniqTask { number: 2 }).await.unwrap();
+        let task = test
+            .create_task(&AsyncUniqTask { number: 2 })
+            .await
+            .unwrap();
 
         let metadata = task.payload.as_object().unwrap();
         let number = metadata["number"].as_u64();
@@ -527,7 +543,8 @@ mod async_queue_tests {
         assert_eq!(Some(2), number);
         assert_eq!(Some("AsyncUniqTask"), type_task);
 
-        let result = test.remove_task_by_hash(AsyncUniqTask { number: 0 }.uniq().unwrap())
+        let result = test
+            .remove_task_by_hash(AsyncUniqTask { number: 0 }.uniq().unwrap())
             .await
             .unwrap();
         assert!(!result, "Should **not** remove task");

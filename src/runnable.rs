@@ -1,9 +1,9 @@
-use std::error::Error;
 use crate::queue::Queueable;
+use crate::task::TaskHash;
+use crate::task::TaskType;
 use crate::Scheduled;
 use async_trait::async_trait;
-use crate::task::{TaskType};
-use crate::task::TaskHash;
+use std::error::Error;
 
 pub const RETRIES_NUMBER: i32 = 20;
 

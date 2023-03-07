@@ -1,7 +1,7 @@
 use crate::queue::Queueable;
-use crate::task::{TaskType};
+use crate::task::TaskType;
 use crate::worker::AsyncWorker;
-use crate::{RetentionMode};
+use crate::RetentionMode;
 use async_recursion::async_recursion;
 use log::error;
 use typed_builder::TypedBuilder;
@@ -50,7 +50,7 @@ where
         let join_handle = tokio::spawn(async move {
             let mut worker: AsyncWorker<AQueue> = AsyncWorker::builder()
                 .queue(inner_pool.queue.clone())
-                .retention_mode(inner_pool.retention_mode.clone())
+                .retention_mode(inner_pool.retention_mode)
                 .task_type(inner_pool.task_type.clone())
                 .build();
 

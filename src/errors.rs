@@ -1,5 +1,5 @@
-use std::fmt::Display;
 use serde_json::Error as SerdeError;
+use std::fmt::Display;
 use thiserror::Error;
 
 /// Library errors

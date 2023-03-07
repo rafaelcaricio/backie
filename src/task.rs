@@ -1,15 +1,15 @@
-use std::borrow::Cow;
-use std::fmt;
-use std::fmt::Display;
 use crate::schema::backie_tasks;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel_derive_newtype::DieselNewType;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use std::borrow::Cow;
+use std::fmt;
+use std::fmt::Display;
 use typed_builder::TypedBuilder;
 use uuid::Uuid;
-use serde::Serialize;
-use diesel_derive_newtype::DieselNewType;
-use sha2::{Digest, Sha256};
 
 /// States of a task.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -58,7 +58,10 @@ where
 pub struct TaskHash(Cow<'static, str>);
 
 impl TaskHash {
-    pub fn default_for_task<T>(value: &T) -> Result<Self, serde_json::Error> where T: Serialize {
+    pub fn default_for_task<T>(value: &T) -> Result<Self, serde_json::Error>
+    where
+        T: Serialize,
+    {
         let value = serde_json::to_value(value)?;
         let mut hasher = Sha256::new();
         hasher.update(serde_json::to_string(&value)?.as_bytes());
