@@ -1,11 +1,11 @@
 [package]
-name = "frango"
+name = "backie"
 version = "0.1.0"
 authors = [
     "Rafael Caricio <rafael@caricio.com>",
 ]
 description = "Async background job processing library with Diesel and Tokio"
-repository = "https://code.caric.io/rafaelcaricio/frango"
+repository = "https://code.caric.io/rafaelcaricio/backie"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -26,10 +26,10 @@ sha2 = "0.10"
 thiserror = "1.0"
 typed-builder = "0.12"
 typetag = "0.2"
-uuid = { version = "1.1", features = ["v4"] }
+uuid = { version = "1.1", features = ["v4", "serde"] }
 async-trait = "0.1"
 async-recursion = "1"
 diesel = { version = "2.0", features = ["postgres", "serde_json", "chrono", "uuid"] }
-diesel-derive-enum = { version = "2.0.1", features = ["postgres"] }
+diesel-derive-newtype = "2.0.0-rc.0"
 diesel-async = { version = "0.2", features = ["postgres", "bb8"] }
 tokio = { version = "1.25", features = ["rt", "time", "macros"] }

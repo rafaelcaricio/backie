@@ -1,46 +1,46 @@
-use crate::errors::FrangoError;
-use crate::queue::AsyncQueueable;
+use std::error::Error;
+use crate::queue::Queueable;
 use crate::Scheduled;
 use async_trait::async_trait;
+use crate::task::{TaskType};
+use crate::task::TaskHash;
 
-const COMMON_TYPE: &str = "common";
 pub const RETRIES_NUMBER: i32 = 20;
-/// Implement this trait to run your custom tasks.
+
+/// Task that can be executed by the queue.
+///
+/// The `RunnableTask` trait is used to define the behaviour of a task. You must implement this
+/// trait for all tasks you want to execute.
 #[typetag::serde(tag = "type")]
 #[async_trait]
-pub trait AsyncRunnable: Send + Sync {
+pub trait RunnableTask: Send + Sync {
     /// Execute the task. This method should define its logic
-    async fn run(&self, client: &mut dyn AsyncQueueable) -> Result<(), FrangoError>;
+    async fn run(&self, queue: &mut dyn Queueable) -> Result<(), Box<dyn Error + Send + 'static>>;
 
     /// Define the type of the task.
     /// The `common` task type is used by default
-    fn task_type(&self) -> String {
-        COMMON_TYPE.to_string()
+    fn task_type(&self) -> TaskType {
+        TaskType::default()
     }
 
     /// If set to true, no new tasks with the same metadata will be inserted
     /// By default it is set to false.
-    fn uniq(&self) -> bool {
-        false
+    fn uniq(&self) -> Option<TaskHash> {
+        None
     }
 
     /// This method defines if a task is periodic or it should be executed once in the future.
     ///
     /// Be careful it works only with the UTC timezone.
     ///
-    ///
     /// Example:
     ///
-    ///
-    /**
-    ```rust
-     fn cron(&self) -> Option<Scheduled> {
-         let expression = "0/20 * * * Aug-Sep * 2022/1";
-         Some(Scheduled::CronPattern(expression.to_string()))
-     }
-    ```
-    */
-
+    /// ```rust
+    /// fn cron(&self) -> Option<Scheduled> {
+    ///     let expression = "0/20 * * * Aug-Sep * 2022/1";
+    ///     Some(Scheduled::CronPattern(expression.to_string()))
+    /// }
+    ///```
     /// In order to schedule  a task once, use the `Scheduled::ScheduleOnce` enum variant.
     fn cron(&self) -> Option<Scheduled> {
         None

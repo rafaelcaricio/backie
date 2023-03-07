@@ -1,3 +1,4 @@
+use std::convert::Infallible;
 use fang::queue::AsyncQueueable;
 use fang::runnable::AsyncRunnable;
 use fang::errors::FrangoError;
@@ -30,7 +31,7 @@ impl MyFailingTask {
 #[async_trait]
 #[typetag::serde]
 impl AsyncRunnable for MyTask {
-    async fn run(&self, queue: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
+    async fn run(&self, queue: &mut dyn AsyncQueueable) -> Result<(), Infallible> {
         // let new_task = MyTask::new(self.number + 1);
         // queue
         //     .insert_task(&new_task as &dyn AsyncRunnable)

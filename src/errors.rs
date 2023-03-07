@@ -1,23 +1,30 @@
+use std::fmt::Display;
 use serde_json::Error as SerdeError;
 use thiserror::Error;
 
-/// An error that can happen during executing of tasks
-#[derive(Debug)]
-pub struct FrangoError {
+/// Library errors
+#[derive(Debug, Clone, Error)]
+pub struct BackieError {
     /// A description of an error
     pub description: String,
 }
 
-impl From<AsyncQueueError> for FrangoError {
+impl Display for BackieError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.description)
+    }
+}
+
+impl From<AsyncQueueError> for BackieError {
     fn from(error: AsyncQueueError) -> Self {
         let message = format!("{error:?}");
-        FrangoError {
+        BackieError {
             description: message,
         }
     }
 }
 
-impl From<SerdeError> for FrangoError {
+impl From<SerdeError> for BackieError {
     fn from(error: SerdeError) -> Self {
         Self::from(AsyncQueueError::SerdeError(error))
     }
@@ -41,12 +48,15 @@ pub enum CronError {
 pub enum AsyncQueueError {
     #[error(transparent)]
     PgError(#[from] diesel::result::Error),
+
     #[error(transparent)]
     SerdeError(#[from] serde_json::Error),
+
     #[error(transparent)]
     CronError(#[from] CronError),
-    #[error("Can not perform this operation if task is not uniq, please check its definition in impl AsyncRunnable")]
-    TaskNotUniqError,
+
+    #[error("Task is not in progress, operation not allowed")]
+    TaskNotRunning,
 }
 
 impl From<cron::error::Error> for AsyncQueueError {

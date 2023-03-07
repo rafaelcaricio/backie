@@ -1,81 +1,101 @@
-use crate::errors::FrangoError;
-use crate::fang_task_state::FangTaskState;
-use crate::queue::AsyncQueueable;
-use crate::runnable::AsyncRunnable;
-use crate::task::Task;
-use crate::task::DEFAULT_TASK_TYPE;
+use std::error::Error;
+use crate::errors::BackieError;
+use crate::queue::Queueable;
+use crate::runnable::RunnableTask;
+use crate::task::{Task, TaskType};
 use crate::Scheduled::*;
-use crate::{RetentionMode, SleepParams};
+use crate::{RetentionMode};
 use log::error;
 use typed_builder::TypedBuilder;
 
 /// it executes tasks only of task_type type, it sleeps when there are no tasks in the queue
 #[derive(TypedBuilder)]
-pub struct AsyncWorker<AQueue>
+pub struct AsyncWorker<Q>
 where
-    AQueue: AsyncQueueable + Clone + Sync + 'static,
+    Q: Queueable + Clone + Sync + 'static,
 {
     #[builder(setter(into))]
-    pub queue: AQueue,
-    #[builder(default=DEFAULT_TASK_TYPE.to_string(), setter(into))]
-    pub task_type: String,
+    pub queue: Q,
+
     #[builder(default, setter(into))]
-    pub sleep_params: SleepParams,
+    pub task_type: Option<TaskType>,
+
     #[builder(default, setter(into))]
     pub retention_mode: RetentionMode,
 }
 
-impl<AQueue> AsyncWorker<AQueue>
+// impl<TypedBuilderFields, Q> AsyncWorkerBuilder<TypedBuilderFields, Q>
+//     where
+//         TypedBuilderFields: Clone,
+//         Q: Queueable + Clone + Sync + 'static,
+// {
+//     pub fn with_graceful_shutdown<F>(self, signal: F) -> Self<TypedBuilderFields, Q>
+//         where
+//             F: Future<Output = ()>,
+//     {
+//         self
+//     }
+// }
+
+impl<Q> AsyncWorker<Q>
 where
-    AQueue: AsyncQueueable + Clone + Sync + 'static,
+    Q: Queueable + Clone + Sync + 'static,
 {
-    async fn run(&mut self, task: Task, runnable: Box<dyn AsyncRunnable>) -> Result<(), FrangoError> {
+    async fn run(&mut self, task: Task, runnable: Box<dyn RunnableTask>) -> Result<(), BackieError> {
+        // TODO: catch panics
         let result = runnable.run(&mut self.queue).await;
-
         match result {
-            Ok(_) => self.finalize_task(task, &result).await?,
-
-            Err(ref error) => {
+            Ok(_) => self.finalize_task(task, result).await?,
+            Err(error) => {
                 if task.retries < runnable.max_retries() {
                     let backoff_seconds = runnable.backoff(task.retries as u32);
 
+                    log::debug!(
+                        "Task {} failed to run and will be retried in {} seconds",
+                        task.id,
+                        backoff_seconds
+                    );
+                    let error_message = format!("{}", error);
                     self.queue
-                        .schedule_retry(&task, backoff_seconds, &error.description)
+                        .schedule_task_retry(task.id, backoff_seconds, &error_message)
                         .await?;
                 } else {
-                    self.finalize_task(task, &result).await?;
+                    log::debug!("Task {} failed and reached the maximum retries", task.id);
+                    self.finalize_task(task, Err(error)).await?;
                 }
             }
         }
-
         Ok(())
     }
 
     async fn finalize_task(
         &mut self,
         task: Task,
-        result: &Result<(), FrangoError>,
-    ) -> Result<(), FrangoError> {
+        result: Result<(), Box<dyn Error + Send + 'static>>,
+    ) -> Result<(), BackieError> {
         match self.retention_mode {
             RetentionMode::KeepAll => match result {
                 Ok(_) => {
-                    self.queue
-                        .update_task_state(task, FangTaskState::Finished)
-                        .await?;
+                    self.queue.set_task_done(task.id).await?;
+                    log::debug!("Task {} done and kept in the database", task.id);
                 }
                 Err(error) => {
-                    self.queue.fail_task(task, &error.description).await?;
+                    log::debug!("Task {} failed and kept in the database", task.id);
+                    self.queue.set_task_failed(task.id, &format!("{}", error)).await?;
                 }
             },
             RetentionMode::RemoveAll => {
+                log::debug!("Task {} finalized and deleted from the database", task.id);
                 self.queue.remove_task(task.id).await?;
             }
-            RetentionMode::RemoveFinished => match result {
+            RetentionMode::RemoveDone => match result {
                 Ok(_) => {
+                    log::debug!("Task {} done and deleted from the database", task.id);
                     self.queue.remove_task(task.id).await?;
                 }
                 Err(error) => {
-                    self.queue.fail_task(task, &error.description).await?;
+                    log::debug!("Task {} failed and kept in the database", task.id);
+                    self.queue.set_task_failed(task.id, &format!("{}", error)).await?;
                 }
             },
         };
@@ -83,64 +103,68 @@ where
         Ok(())
     }
 
-    async fn sleep(&mut self) {
-        self.sleep_params.maybe_increase_sleep_period();
-
-        tokio::time::sleep(self.sleep_params.sleep_period).await;
+    async fn wait(&mut self) {
+        // TODO: add a way to stop the worker
+        // Listen to postgres pubsub notification
+        // Listen to watchable future
+        // All that until a max timeout
+        //
+        // select! {
+        //     _ = self.queue.wait_for_task(Some(self.task_type.clone())).fuse() => {},
+        //     _ = SleepParams::default().sleep().fuse() => {},
+        // }
     }
 
-    pub(crate) async fn run_tasks(&mut self) -> Result<(), FrangoError> {
+    pub(crate) async fn run_tasks(&mut self) {
         loop {
-            //fetch task
+            // TODO: check if should stop the worker
             match self
                 .queue
-                .fetch_and_touch_task(Some(self.task_type.clone()))
+                .pull_next_task(self.task_type.clone())
                 .await
             {
                 Ok(Some(task)) => {
-                    let actual_task: Box<dyn AsyncRunnable> =
-                        serde_json::from_value(task.metadata.clone()).unwrap();
+                    let actual_task: Box<dyn RunnableTask> = serde_json::from_value(task.payload.clone()).unwrap();
 
                     // check if task is scheduled or not
                     if let Some(CronPattern(_)) = actual_task.cron() {
                         // program task
-                        self.queue.schedule_task(&*actual_task).await?;
+                        //self.queue.schedule_task(&*actual_task).await?;
                     }
-                    self.sleep_params.maybe_reset_sleep_period();
                     // run scheduled task
-                    self.run(task, actual_task).await?;
+                    // TODO: what do we do if the task fails? it's an internal error, inform the logs
+                    let _ = self.run(task, actual_task).await;
                 }
                 Ok(None) => {
-                    self.sleep().await;
+                    self.wait().await;
                 }
 
                 Err(error) => {
                     error!("Failed to fetch a task {:?}", error);
-
-                    self.sleep().await;
+                    self.wait().await;
                 }
             };
         }
     }
 
     #[cfg(test)]
-    pub async fn run_tasks_until_none(&mut self) -> Result<(), FrangoError> {
+    pub async fn run_tasks_until_none(&mut self) -> Result<(), BackieError> {
         loop {
             match self
                 .queue
-                .fetch_and_touch_task(Some(self.task_type.clone()))
+                .pull_next_task(self.task_type.clone())
                 .await
             {
                 Ok(Some(task)) => {
-                    let actual_task: Box<dyn AsyncRunnable> =
-                        serde_json::from_value(task.metadata.clone()).unwrap();
+                    let actual_task: Box<dyn RunnableTask> =
+                        serde_json::from_value(task.payload.clone()).unwrap();
 
                     // check if task is scheduled or not
                     if let Some(CronPattern(_)) = actual_task.cron() {
                         // program task
-                        self.queue.schedule_task(&*actual_task).await?;
+                        // self.queue.schedule_task(&*actual_task).await?;
                     }
-                    self.sleep_params.maybe_reset_sleep_period();
+                    self.wait().await;
                     // run scheduled task
                     self.run(task, actual_task).await?;
                 }
@@ -150,7 +174,7 @@ where
                 Err(error) => {
                     error!("Failed to fetch a task {:?}", error);
 
-                    self.sleep().await;
+                    self.wait().await;
                 }
             };
         }
@@ -160,8 +184,8 @@ where
 #[cfg(test)]
 mod async_worker_tests {
     use super::*;
-    use crate::errors::FrangoError;
-    use crate::queue::AsyncQueueable;
+    use crate::errors::BackieError;
+    use crate::queue::Queueable;
     use crate::queue::PgAsyncQueue;
     use crate::worker::Task;
     use crate::RetentionMode;
@@ -172,6 +196,7 @@ mod async_worker_tests {
     use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
     use diesel_async::AsyncPgConnection;
     use serde::{Deserialize, Serialize};
+    use crate::task::TaskState;
 
     #[derive(Serialize, Deserialize)]
     struct WorkerAsyncTask {
@@ -180,8 +205,8 @@ mod async_worker_tests {
 
     #[typetag::serde]
     #[async_trait]
-    impl AsyncRunnable for WorkerAsyncTask {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
+    impl RunnableTask for WorkerAsyncTask {
+        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
     }
@@ -193,8 +218,8 @@ mod async_worker_tests {
 
     #[typetag::serde]
     #[async_trait]
-    impl AsyncRunnable for WorkerAsyncTaskSchedule {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
+    impl RunnableTask for WorkerAsyncTaskSchedule {
+        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
         fn cron(&self) -> Option<Scheduled> {
@@ -209,13 +234,13 @@ mod async_worker_tests {
 
     #[typetag::serde]
     #[async_trait]
-    impl AsyncRunnable for AsyncFailedTask {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
+    impl RunnableTask for AsyncFailedTask {
+        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             let message = format!("number {} is wrong :(", self.number);
 
-            Err(FrangoError {
+            Err(Box::new(BackieError {
                 description: message,
-            })
+            }))
         }
 
         fn max_retries(&self) -> i32 {
@@ -228,13 +253,13 @@ mod async_worker_tests {
 
     #[typetag::serde]
     #[async_trait]
-    impl AsyncRunnable for AsyncRetryTask {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
+    impl RunnableTask for AsyncRetryTask {
+        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             let message = "Failed".to_string();
 
-            Err(FrangoError {
+            Err(Box::new(BackieError {
                 description: message,
-            })
+            }))
         }
 
         fn max_retries(&self) -> i32 {
@@ -247,13 +272,13 @@ mod async_worker_tests {
 
     #[typetag::serde]
     #[async_trait]
-    impl AsyncRunnable for AsyncTaskType1 {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
+    impl RunnableTask for AsyncTaskType1 {
+        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
 
-        fn task_type(&self) -> String {
-            "type1".to_string()
+        fn task_type(&self) -> TaskType {
+            TaskType::from("type1")
         }
     }
 
@@ -262,20 +287,20 @@ mod async_worker_tests {
 
     #[typetag::serde]
     #[async_trait]
-    impl AsyncRunnable for AsyncTaskType2 {
-        async fn run(&self, _queueable: &mut dyn AsyncQueueable) -> Result<(), FrangoError> {
+    impl RunnableTask for AsyncTaskType2 {
+        async fn run(&self, _queueable: &mut dyn Queueable) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             Ok(())
         }
 
-        fn task_type(&self) -> String {
-            "type2".to_string()
+        fn task_type(&self) -> TaskType {
+            TaskType::from("type2")
         }
     }
 
     #[tokio::test]
     async fn execute_and_finishes_task() {
         let pool = pool().await;
-        let mut test = PgAsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::new(pool);
 
         let actual_task = WorkerAsyncTask { number: 1 };
 
@@ -290,53 +315,53 @@ mod async_worker_tests {
         worker.run(task, Box::new(actual_task)).await.unwrap();
         let task_finished = test.find_task_by_id(id).await.unwrap();
         assert_eq!(id, task_finished.id);
-        assert_eq!(FangTaskState::Finished, task_finished.state);
+        assert_eq!(TaskState::Done, task_finished.state());
 
         test.remove_all_tasks().await.unwrap();
     }
 
-    #[tokio::test]
-    async fn schedule_task_test() {
-        let pool = pool().await;
-        let mut test = PgAsyncQueue::builder().pool(pool).build();
-
-        let actual_task = WorkerAsyncTaskSchedule { number: 1 };
-
-        let task = test.schedule_task(&actual_task).await.unwrap();
-
-        let id = task.id;
-
-        let mut worker = AsyncWorker::<PgAsyncQueue>::builder()
-            .queue(test.clone())
-            .retention_mode(RetentionMode::KeepAll)
-            .build();
-
-        worker.run_tasks_until_none().await.unwrap();
-
-        let task = worker.queue.find_task_by_id(id).await.unwrap();
-
-        assert_eq!(id, task.id);
-        assert_eq!(FangTaskState::New, task.state);
-
-        tokio::time::sleep(core::time::Duration::from_secs(3)).await;
-
-        worker.run_tasks_until_none().await.unwrap();
-
-        let task = test.find_task_by_id(id).await.unwrap();
-        assert_eq!(id, task.id);
-        assert_eq!(FangTaskState::Finished, task.state);
-
-        test.remove_all_tasks().await.unwrap();
-    }
+    // #[tokio::test]
+    // async fn schedule_task_test() {
+    //     let pool = pool().await;
+    //     let mut test = PgAsyncQueue::new(pool);
+    // 
+    //     let actual_task = WorkerAsyncTaskSchedule { number: 1 };
+    // 
+    //     let task = test.schedule_task(&actual_task).await.unwrap();
+    // 
+    //     let id = task.id;
+    // 
+    //     let mut worker = AsyncWorker::<PgAsyncQueue>::builder()
+    //         .queue(test.clone())
+    //         .retention_mode(RetentionMode::KeepAll)
+    //         .build();
+    // 
+    //     worker.run_tasks_until_none().await.unwrap();
+    // 
+    //     let task = worker.queue.find_task_by_id(id).await.unwrap();
+    // 
+    //     assert_eq!(id, task.id);
+    //     assert_eq!(TaskState::Ready, task.state());
+    // 
+    //     tokio::time::sleep(core::time::Duration::from_secs(3)).await;
+    // 
+    //     worker.run_tasks_until_none().await.unwrap();
+    // 
+    //     let task = test.find_task_by_id(id).await.unwrap();
+    //     assert_eq!(id, task.id);
+    //     assert_eq!(TaskState::Done, task.state());
+    // 
+    //     test.remove_all_tasks().await.unwrap();
+    // }
 
     #[tokio::test]
     async fn retries_task_test() {
         let pool = pool().await;
-        let mut test = PgAsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::new(pool);
 
         let actual_task = AsyncRetryTask {};
 
-        let task = test.insert_task(&actual_task).await.unwrap();
+        let task = test.create_task(&actual_task).await.unwrap();
 
         let id = task.id;
 
@@ -350,8 +375,9 @@ mod async_worker_tests {
         let task = worker.queue.find_task_by_id(id).await.unwrap();
 
         assert_eq!(id, task.id);
-        assert_eq!(FangTaskState::Retried, task.state);
+        assert_eq!(TaskState::Ready, task.state());
         assert_eq!(1, task.retries);
+        assert!(task.error_message.is_some());
 
         tokio::time::sleep(core::time::Duration::from_secs(5)).await;
         worker.run_tasks_until_none().await.unwrap();
@@ -359,7 +385,7 @@ mod async_worker_tests {
         let task = worker.queue.find_task_by_id(id).await.unwrap();
 
         assert_eq!(id, task.id);
-        assert_eq!(FangTaskState::Retried, task.state);
+        assert_eq!(TaskState::Ready, task.state());
         assert_eq!(2, task.retries);
 
         tokio::time::sleep(core::time::Duration::from_secs(10)).await;
@@ -367,7 +393,7 @@ mod async_worker_tests {
 
         let task = test.find_task_by_id(id).await.unwrap();
         assert_eq!(id, task.id);
-        assert_eq!(FangTaskState::Failed, task.state);
+        assert_eq!(TaskState::Failed, task.state());
         assert_eq!("Failed".to_string(), task.error_message.unwrap());
 
         test.remove_all_tasks().await.unwrap();
@@ -376,7 +402,7 @@ mod async_worker_tests {
     #[tokio::test]
     async fn saves_error_for_failed_task() {
         let pool = pool().await;
-        let mut test = PgAsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::new(pool);
 
         let failed_task = AsyncFailedTask { number: 1 };
 
@@ -392,7 +418,7 @@ mod async_worker_tests {
         let task_finished = test.find_task_by_id(id).await.unwrap();
 
         assert_eq!(id, task_finished.id);
-        assert_eq!(FangTaskState::Failed, task_finished.state);
+        assert_eq!(TaskState::Failed, task_finished.state());
         assert_eq!(
             "number 1 is wrong :(".to_string(),
             task_finished.error_message.unwrap()
@@ -404,7 +430,7 @@ mod async_worker_tests {
     #[tokio::test]
     async fn executes_task_only_of_specific_type() {
         let pool = pool().await;
-        let mut test = PgAsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::new(pool);
 
         let task1 = insert_task(&mut test, &AsyncTaskType1 {}).await;
         let task12 = insert_task(&mut test, &AsyncTaskType1 {}).await;
@@ -416,7 +442,7 @@ mod async_worker_tests {
 
         let mut worker = AsyncWorker::<PgAsyncQueue>::builder()
             .queue(test.clone())
-            .task_type("type1".to_string())
+            .task_type(TaskType::from("type1"))
             .retention_mode(RetentionMode::KeepAll)
             .build();
 
@@ -428,9 +454,9 @@ mod async_worker_tests {
         assert_eq!(id1, task1.id);
         assert_eq!(id12, task12.id);
         assert_eq!(id2, task2.id);
-        assert_eq!(FangTaskState::Finished, task1.state);
-        assert_eq!(FangTaskState::Finished, task12.state);
-        assert_eq!(FangTaskState::New, task2.state);
+        assert_eq!(TaskState::Done, task1.state());
+        assert_eq!(TaskState::Done, task12.state());
+        assert_eq!(TaskState::Ready, task2.state());
 
         test.remove_all_tasks().await.unwrap();
     }
@@ -438,7 +464,7 @@ mod async_worker_tests {
     #[tokio::test]
     async fn remove_when_finished() {
         let pool = pool().await;
-        let mut test = PgAsyncQueue::builder().pool(pool).build();
+        let mut test = PgAsyncQueue::new(pool);
 
         let task1 = insert_task(&mut test, &AsyncTaskType1 {}).await;
         let task12 = insert_task(&mut test, &AsyncTaskType1 {}).await;
@@ -450,18 +476,18 @@ mod async_worker_tests {
 
         let mut worker = AsyncWorker::<PgAsyncQueue>::builder()
             .queue(test.clone())
-            .task_type("type1".to_string())
+            .task_type(TaskType::from("type1"))
             .build();
 
         worker.run_tasks_until_none().await.unwrap();
         let task = test
-            .fetch_and_touch_task(Some("type1".to_string()))
+            .pull_next_task(Some(TaskType::from("type1")))
             .await
             .unwrap();
         assert_eq!(None, task);
 
         let task2 = test
-            .fetch_and_touch_task(Some("type2".to_string()))
+            .pull_next_task(Some(TaskType::from("type2")))
             .await
             .unwrap()
             .unwrap();
@@ -470,13 +496,13 @@ mod async_worker_tests {
         test.remove_all_tasks().await.unwrap();
     }
 
-    async fn insert_task(test: &mut PgAsyncQueue, task: &dyn AsyncRunnable) -> Task {
-        test.insert_task(task).await.unwrap()
+    async fn insert_task(test: &mut PgAsyncQueue, task: &dyn RunnableTask) -> Task {
+        test.create_task(task).await.unwrap()
     }
 
     async fn pool() -> Pool<AsyncPgConnection> {
         let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(
-            "postgres://postgres:password@localhost/fang",
+            "postgres://postgres:password@localhost/backie",
         );
         Pool::builder()
             .max_size(1)

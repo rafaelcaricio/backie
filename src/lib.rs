@@ -1,8 +1,6 @@
 #![doc = include_str!("../README.md")]
 
 use chrono::{DateTime, Utc};
-use std::time::Duration;
-use typed_builder::TypedBuilder;
 
 /// Represents a schedule for scheduled tasks.
 ///
@@ -22,66 +20,25 @@ pub enum Scheduled {
 /// All possible options for retaining tasks in the db after their execution.
 ///
 /// The default mode is [`RetentionMode::RemoveAll`]
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum RetentionMode {
     /// Keep all tasks
     KeepAll,
-    /// Remove all tasks
+
+    /// Remove all finished tasks independently of their final execution state.
     RemoveAll,
+
     /// Remove only successfully finished tasks
-    RemoveFinished,
+    RemoveDone,
 }
 
 impl Default for RetentionMode {
     fn default() -> Self {
-        RetentionMode::RemoveAll
-    }
-}
-
-/// Configuration parameters for putting workers to sleep
-/// while they don't have any tasks to execute
-#[derive(Clone, Debug, TypedBuilder)]
-pub struct SleepParams {
-    /// the current sleep period
-    pub sleep_period: Duration,
-    /// the maximum period a worker is allowed to sleep.
-    /// After this value is reached, `sleep_period` is not increased anymore
-    pub max_sleep_period: Duration,
-    /// the initial value of the `sleep_period`
-    pub min_sleep_period: Duration,
-    /// the step that `sleep_period` is increased by on every iteration
-    pub sleep_step: Duration,
-}
-
-impl SleepParams {
-    /// Reset the `sleep_period` if `sleep_period` > `min_sleep_period`
-    pub fn maybe_reset_sleep_period(&mut self) {
-        if self.sleep_period != self.min_sleep_period {
-            self.sleep_period = self.min_sleep_period;
-        }
-    }
-
-    /// Increase the `sleep_period` by the `sleep_step` if the `max_sleep_period` is not reached
-    pub fn maybe_increase_sleep_period(&mut self) {
-        if self.sleep_period < self.max_sleep_period {
-            self.sleep_period += self.sleep_step;
-        }
-    }
-}
-
-impl Default for SleepParams {
-    fn default() -> Self {
-        SleepParams {
-            sleep_period: Duration::from_secs(5),
-            max_sleep_period: Duration::from_secs(15),
-            min_sleep_period: Duration::from_secs(5),
-            sleep_step: Duration::from_secs(5),
-        }
+        Self::RemoveAll
     }
 }
 
 pub mod errors;
-pub mod fang_task_state;
 mod queries;
 pub mod queue;
 pub mod runnable;
