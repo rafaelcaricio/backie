@@ -1,18 +1,15 @@
-use fang::queue::PgAsyncQueue;
-use fang::queue::AsyncQueueable;
-use fang::worker_pool::AsyncWorkerPool;
-use fang::runnable::AsyncRunnable;
-use simple_async_worker::MyFailingTask;
-use simple_async_worker::MyTask;
+use simple_worker::MyFailingTask;
+use simple_worker::MyTask;
 use std::time::Duration;
 use diesel_async::pg::AsyncPgConnection;
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
+use backie::{PgAsyncQueue, WorkerPool, Queueable};
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
 
-    let connection_url = "postgres://postgres:password@localhost/fang";
+    let connection_url = "postgres://postgres:password@localhost/backie";
 
     log::info!("Starting...");
     let max_pool_size: u32 = 3;
@@ -23,41 +20,51 @@ async fn main() {
         .build(manager)
         .await
         .unwrap();
-
-    let mut queue = PgAsyncQueue::builder()
-        .pool(pool)
-        .build();
-
-    log::info!("Queue connected...");
-
-    let mut workers_pool: AsyncWorkerPool<PgAsyncQueue> = AsyncWorkerPool::builder()
-        .number_of_workers(10_u32)
-        .queue(queue.clone())
-        .build();
-
     log::info!("Pool created ...");
 
-    workers_pool.start().await;
-    log::info!("Workers started ...");
+    let mut queue = PgAsyncQueue::new(pool);
+
+    let (tx, mut rx) = tokio::sync::watch::channel(false);
+
+    let executor_task = tokio::spawn({
+        let mut queue = queue.clone();
+        async move {
+            let mut workers_pool: WorkerPool<PgAsyncQueue> = WorkerPool::builder()
+                .number_of_workers(10_u32)
+                .queue(queue)
+                .build();
+
+            log::info!("Workers starting ...");
+            workers_pool.start(async move {
+                rx.changed().await;
+            }).await;
+            log::info!("Workers stopped!");
+        }
+    });
 
     let task1 = MyTask::new(0);
     let task2 = MyTask::new(20_000);
     let task3 = MyFailingTask::new(50_000);
 
     queue
-        .insert_task(&task1 as &dyn AsyncRunnable)
+        .create_task(&task1)
         .await
         .unwrap();
 
     queue
-        .insert_task(&task2 as &dyn AsyncRunnable)
+        .create_task(&task2)
         .await
         .unwrap();
 
     queue
-        .insert_task(&task3 as &dyn AsyncRunnable)
+        .create_task(&task3)
         .await
         .unwrap();
 
-    tokio::time::sleep(Duration::from_secs(100)).await;
+    log::info!("Tasks created ...");
+    tokio::signal::ctrl_c().await;
+    log::info!("Stopping ...");
+    tx.send(true).unwrap();
+    executor_task.await.unwrap();
+    log::info!("Stopped!");
 }

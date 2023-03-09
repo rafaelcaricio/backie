@@ -4,13 +4,14 @@ use crate::runnable::RunnableTask;
 use crate::task::{Task, TaskType};
 use crate::RetentionMode;
 use crate::Scheduled::*;
-use log::error;
+use futures::future::FutureExt;
+use futures::select;
 use std::error::Error;
 use typed_builder::TypedBuilder;
 
 /// it executes tasks only of task_type type, it sleeps when there are no tasks in the queue
 #[derive(TypedBuilder)]
-pub struct AsyncWorker<Q>
+pub struct Worker<Q>
 where
     Q: Queueable + Clone + Sync + 'static,
 {
@@ -22,22 +23,12 @@ where
 
     #[builder(default, setter(into))]
     pub retention_mode: RetentionMode,
+
+    #[builder(default, setter(into))]
+    pub shutdown: Option<tokio::sync::watch::Receiver<()>>,
 }
 
-// impl<TypedBuilderFields, Q> AsyncWorkerBuilder<TypedBuilderFields, Q>
-//     where
-//         TypedBuilderFields: Clone,
-//         Q: Queueable + Clone + Sync + 'static,
-// {
-//     pub fn with_graceful_shutdown<F>(self, signal: F) -> Self<TypedBuilderFields, Q>
-//         where
-//             F: Future<Output = ()>,
-//     {
-//         self
-//     }
-// }
-
-impl<Q> AsyncWorker<Q>
+impl<Q> Worker<Q>
 where
     Q: Queueable + Clone + Sync + 'static,
 {
@@ -111,25 +102,12 @@ where
         Ok(())
     }
 
-    async fn wait(&mut self) {
-        // TODO: add a way to stop the worker
-        // Listen to postgres pubsub notification
-        // Listen to watchable future
-        // All that until a max timeout
-        //
-        // select! {
-        //     _ = self.queue.wait_for_task(Some(self.task_type.clone())).fuse() => {},
-        //     _ = SleepParams::default().sleep().fuse() => {},
-        // }
-    }
-
-    pub(crate) async fn run_tasks(&mut self) {
+    pub(crate) async fn run_tasks(&mut self) -> Result<(), BackieError> {
         loop {
-            // TODO: check if should stop the worker
-            match self.queue.pull_next_task(self.task_type.clone()).await {
-                Ok(Some(task)) => {
+            match self.queue.pull_next_task(self.task_type.clone()).await? {
+                Some(task) => {
                     let actual_task: Box<dyn RunnableTask> =
-                        serde_json::from_value(task.payload.clone()).unwrap();
+                        serde_json::from_value(task.payload.clone())?;
 
                     // check if task is scheduled or not
                     if let Some(CronPattern(_)) = actual_task.cron() {
@@ -140,13 +118,25 @@ where
                     // TODO: what do we do if the task fails? it's an internal error, inform the logs
                     let _ = self.run(task, actual_task).await;
                 }
-                Ok(None) => {
-                    self.wait().await;
-                }
-
-                Err(error) => {
-                    error!("Failed to fetch a task {:?}", error);
-                    self.wait().await;
+                None => {
+                    // Listen to watchable future
+                    // All that until a max timeout
+                    match &mut self.shutdown {
+                        Some(recv) => {
+                            // Listen to watchable future
+                            // All that until a max timeout
+                            select! {
+                                _ = recv.changed().fuse() => {
+                                    log::info!("Shutting down worker");
+                                    return Ok(());
+                                }
+                                _ = tokio::time::sleep(std::time::Duration::from_secs(1)).fuse() => {}
+                            }
+                        }
+                        None => {
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        }
+                    };
                 }
             };
         }
@@ -155,8 +145,8 @@ where
     #[cfg(test)]
     pub async fn run_tasks_until_none(&mut self) -> Result<(), BackieError> {
         loop {
-            match self.queue.pull_next_task(self.task_type.clone()).await {
-                Ok(Some(task)) => {
+            match self.queue.pull_next_task(self.task_type.clone()).await? {
+                Some(task) => {
                     let actual_task: Box<dyn RunnableTask> =
                         serde_json::from_value(task.payload.clone()).unwrap();
 
@@ -165,17 +155,11 @@ where
                         // program task
                         // self.queue.schedule_task(&*actual_task).await?;
                     }
-                    self.wait().await;
                     // run scheduled task
                     self.run(task, actual_task).await?;
                 }
-                Ok(None) => {
+                None => {
                     return Ok(());
-                }
-                Err(error) => {
-                    error!("Failed to fetch a task {:?}", error);
-
-                    self.wait().await;
                 }
             };
         }
@@ -184,8 +168,8 @@ where
 
 #[cfg(test)]
 mod async_worker_tests {
+    use std::fmt::Display;
     use super::*;
-    use crate::errors::BackieError;
     use crate::queue::PgAsyncQueue;
     use crate::queue::Queueable;
     use crate::task::TaskState;
@@ -198,6 +182,22 @@ mod async_worker_tests {
     use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
     use diesel_async::AsyncPgConnection;
     use serde::{Deserialize, Serialize};
+    use thiserror::Error;
+
+    #[derive(Error, Debug)]
+    enum TaskError {
+        SomethingWrong,
+        Custom(String),
+    }
+
+    impl Display for TaskError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                TaskError::SomethingWrong => write!(f, "Something went wrong"),
+                TaskError::Custom(message) => write!(f, "{}", message),
+            }
+        }
+    }
 
     #[derive(Serialize, Deserialize)]
     struct WorkerAsyncTask {
@@ -248,9 +248,7 @@ mod async_worker_tests {
         ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
             let message = format!("number {} is wrong :(", self.number);
 
-            Err(Box::new(BackieError {
-                description: message,
-            }))
+            Err(Box::new(TaskError::Custom(message)))
         }
 
         fn max_retries(&self) -> i32 {
@@ -268,11 +266,7 @@ mod async_worker_tests {
             &self,
             _queueable: &mut dyn Queueable,
         ) -> Result<(), Box<(dyn std::error::Error + Send + 'static)>> {
-            let message = "Failed".to_string();
-
-            Err(Box::new(BackieError {
-                description: message,
-            }))
+            Err(Box::new(TaskError::SomethingWrong))
         }
 
         fn max_retries(&self) -> i32 {
@@ -326,7 +320,7 @@ mod async_worker_tests {
         let task = insert_task(&mut test, &actual_task).await;
         let id = task.id;
 
-        let mut worker = AsyncWorker::<PgAsyncQueue>::builder()
+        let mut worker = Worker::<PgAsyncQueue>::builder()
             .queue(test.clone())
             .retention_mode(RetentionMode::KeepAll)
             .build();
@@ -384,7 +378,7 @@ mod async_worker_tests {
 
         let id = task.id;
 
-        let mut worker = AsyncWorker::<PgAsyncQueue>::builder()
+        let mut worker = Worker::<PgAsyncQueue>::builder()
             .queue(test.clone())
             .retention_mode(RetentionMode::KeepAll)
             .build();
@@ -413,9 +407,33 @@ mod async_worker_tests {
         let task = test.find_task_by_id(id).await.unwrap();
         assert_eq!(id, task.id);
         assert_eq!(TaskState::Failed, task.state());
-        assert_eq!("Failed".to_string(), task.error_message.unwrap());
+        assert_eq!("Something went wrong".to_string(), task.error_message.unwrap());
 
         test.remove_all_tasks().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn worker_shutsdown_when_notified() {
+        let pool = pool().await;
+        let queue = PgAsyncQueue::new(pool);
+
+        let (tx, rx) = tokio::sync::watch::channel(());
+
+        let mut worker = Worker::<PgAsyncQueue>::builder()
+            .queue(queue)
+            .shutdown(rx)
+            .build();
+
+        let handle = tokio::spawn(async move {
+            worker.run_tasks().await.unwrap();
+            true
+        });
+
+        tx.send(()).unwrap();
+        select! {
+            _ = handle.fuse() => {}
+            _ = tokio::time::sleep(core::time::Duration::from_secs(1)).fuse() => panic!("Worker did not shutdown")
+        }
     }
 
     #[tokio::test]
@@ -428,7 +446,7 @@ mod async_worker_tests {
         let task = insert_task(&mut test, &failed_task).await;
         let id = task.id;
 
-        let mut worker = AsyncWorker::<PgAsyncQueue>::builder()
+        let mut worker = Worker::<PgAsyncQueue>::builder()
             .queue(test.clone())
             .retention_mode(RetentionMode::KeepAll)
             .build();
@@ -459,7 +477,7 @@ mod async_worker_tests {
         let id12 = task12.id;
         let id2 = task2.id;
 
-        let mut worker = AsyncWorker::<PgAsyncQueue>::builder()
+        let mut worker = Worker::<PgAsyncQueue>::builder()
             .queue(test.clone())
             .task_type(TaskType::from("type1"))
             .retention_mode(RetentionMode::KeepAll)
@@ -493,7 +511,7 @@ mod async_worker_tests {
         let _id12 = task12.id;
         let id2 = task2.id;
 
-        let mut worker = AsyncWorker::<PgAsyncQueue>::builder()
+        let mut worker = Worker::<PgAsyncQueue>::builder()
             .queue(test.clone())
             .task_type(TaskType::from("type1"))
             .build();
@@ -521,7 +539,7 @@ mod async_worker_tests {
 
     async fn pool() -> Pool<AsyncPgConnection> {
         let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(
-            "postgres://postgres:password@localhost/backie",
+            option_env!("DATABASE_URL").expect("DATABASE_URL must be set"),
         );
         Pool::builder()
             .max_size(1)

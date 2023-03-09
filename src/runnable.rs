@@ -5,7 +5,7 @@ use crate::Scheduled;
 use async_trait::async_trait;
 use std::error::Error;
 
-pub const RETRIES_NUMBER: i32 = 20;
+pub const RETRIES_NUMBER: i32 = 5;
 
 /// Task that can be executed by the queue.
 ///

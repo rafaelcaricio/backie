@@ -360,7 +360,7 @@ mod async_queue_tests {
     #[tokio::test]
     async fn remove_all_tasks_test() {
         let pool = pool().await;
-        let mut test = PgAsyncQueue::new(pool.into());
+        let mut test = PgAsyncQueue::new(pool);
 
         let task = test.create_task(&AsyncTask { number: 1 }).await.unwrap();
 
@@ -560,7 +560,7 @@ mod async_queue_tests {
 
     async fn pool() -> Pool<AsyncPgConnection> {
         let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(
-            "postgres://postgres:password@localhost/backie",
+            option_env!("DATABASE_URL").expect("DATABASE_URL must be set"),
         );
         Pool::builder()
             .max_size(1)

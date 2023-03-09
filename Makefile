@@ -1,20 +1,25 @@
-db:
-	docker run --rm -d --name postgres -p 5432:5432 \
-  -e POSTGRES_DB=fang \
-  -e POSTGRES_USER=postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  postgres:latest
-clippy:
-	cargo clippy --all-features
-diesel:
-	DATABASE_URL=postgres://postgres:postgres@localhost/fang diesel migration run
-stop:
-	docker kill postgres
-tests:
-	DATABASE_URL=postgres://postgres:postgres@localhost/fang cargo test --all-features -- --color always --nocapture
+PHONY: db, clippy, diesel, stop, tests, ignored, doc
 
-ignored:
-	DATABASE_URL=postgres://postgres:postgres@localhost/fang cargo test --all-features -- --color always --nocapture --ignored
+DATABASE_URL := postgres://postgres:password@localhost/backie
+
+db:
+	docker run --rm -d --name backie-db -p 5432:5432 \
+	  -e POSTGRES_DB=backie \
+	  -e POSTGRES_USER=postgres \
+	  -e POSTGRES_PASSWORD=password \
+	  postgres:latest
+
+clippy:
+	cargo clippy --tests -- -D clippy::all
+
+diesel:
+	DATABASE_URL=$(DATABASE_URL) diesel migration run
+
+stop:
+	docker kill backie-db
+
+tests:
+	DATABASE_URL=$(DATABASE_URL) cargo test --all-features -- --color always --nocapture --test-threads 1
 
 doc:
 	cargo doc --open

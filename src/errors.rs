@@ -3,30 +3,22 @@ use std::fmt::Display;
 use thiserror::Error;
 
 /// Library errors
-#[derive(Debug, Clone, Error)]
-pub struct BackieError {
-    /// A description of an error
-    pub description: String,
+#[derive(Debug, Error)]
+pub enum BackieError {
+    QueueProcessingError(#[from] AsyncQueueError),
+    SerializationError(#[from] SerdeError),
+    ShutdownError(#[from] tokio::sync::watch::error::SendError<()>),
 }
 
 impl Display for BackieError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.description)
-    }
-}
-
-impl From<AsyncQueueError> for BackieError {
-    fn from(error: AsyncQueueError) -> Self {
-        let message = format!("{error:?}");
-        BackieError {
-            description: message,
+        match self {
+            BackieError::QueueProcessingError(error) => {
+                write!(f, "Queue processing error: {}", error)
+            }
+            BackieError::SerializationError(error) => write!(f, "Serialization error: {}", error),
+            BackieError::ShutdownError(error) => write!(f, "Shutdown error: {}", error),
         }
-    }
-}
-
-impl From<SerdeError> for BackieError {
-    fn from(error: SerdeError) -> Self {
-        Self::from(AsyncQueueError::SerdeError(error))
     }
 }
 

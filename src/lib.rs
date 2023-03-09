@@ -38,11 +38,16 @@ impl Default for RetentionMode {
     }
 }
 
+pub use queue::PgAsyncQueue;
+pub use queue::Queueable;
+pub use runnable::RunnableTask;
+pub use worker_pool::WorkerPool;
+
 pub mod errors;
 mod queries;
 pub mod queue;
 pub mod runnable;
-pub mod schema;
+mod schema;
 pub mod task;
 pub mod worker;
 pub mod worker_pool;
