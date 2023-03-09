@@ -1,6 +1,4 @@
-[![Crates.io][s1]][ci] [![docs page][docs-badge]][docs] ![test][ga-test] ![style][ga-style]
-
-# Backie
+# Backie 🚲
 
 Async background job processing library with Diesel and Tokio. It's a heavily modified fork of [fang](https://github.com/ayrat555/fang).
 

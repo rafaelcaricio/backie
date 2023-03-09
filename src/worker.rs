@@ -32,6 +32,70 @@ impl<Q> Worker<Q>
 where
     Q: Queueable + Clone + Sync + 'static,
 {
+    pub(crate) async fn run_tasks(&mut self) -> Result<(), BackieError> {
+        loop {
+            // Need to check if has to stop before pulling next task
+            match self.queue.pull_next_task(self.task_type.clone()).await? {
+                Some(task) => {
+                    let actual_task: Box<dyn RunnableTask> =
+                        serde_json::from_value(task.payload.clone())?;
+
+                    // check if task is scheduled or not
+                    if let Some(CronPattern(_)) = actual_task.cron() {
+                        // program task
+                        //self.queue.schedule_task(&*actual_task).await?;
+                    }
+                    // run scheduled task
+                    // TODO: what do we do if the task fails? it's an internal error, inform the logs
+                    let _ = self.run(task, actual_task).await;
+                }
+                None => {
+                    // Listen to watchable future
+                    // All that until a max timeout
+                    match &mut self.shutdown {
+                        Some(recv) => {
+                            // Listen to watchable future
+                            // All that until a max timeout
+                            select! {
+                                _ = recv.changed().fuse() => {
+                                    log::info!("Shutting down worker");
+                                    return Ok(());
+                                }
+                                _ = tokio::time::sleep(std::time::Duration::from_secs(1)).fuse() => {}
+                            }
+                        }
+                        None => {
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        }
+                    };
+                }
+            };
+        }
+    }
+
+    #[cfg(test)]
+    pub async fn run_tasks_until_none(&mut self) -> Result<(), BackieError> {
+        loop {
+            match self.queue.pull_next_task(self.task_type.clone()).await? {
+                Some(task) => {
+                    let actual_task: Box<dyn RunnableTask> =
+                        serde_json::from_value(task.payload.clone()).unwrap();
+
+                    // check if task is scheduled or not
+                    if let Some(CronPattern(_)) = actual_task.cron() {
+                        // program task
+                        // self.queue.schedule_task(&*actual_task).await?;
+                    }
+                    // run scheduled task
+                    self.run(task, actual_task).await?;
+                }
+                None => {
+                    return Ok(());
+                }
+            };
+        }
+    }
+
     async fn run(
         &mut self,
         task: Task,
@@ -100,69 +164,6 @@ where
         };
 
         Ok(())
-    }
-
-    pub(crate) async fn run_tasks(&mut self) -> Result<(), BackieError> {
-        loop {
-            match self.queue.pull_next_task(self.task_type.clone()).await? {
-                Some(task) => {
-                    let actual_task: Box<dyn RunnableTask> =
-                        serde_json::from_value(task.payload.clone())?;
-
-                    // check if task is scheduled or not
-                    if let Some(CronPattern(_)) = actual_task.cron() {
-                        // program task
-                        //self.queue.schedule_task(&*actual_task).await?;
-                    }
-                    // run scheduled task
-                    // TODO: what do we do if the task fails? it's an internal error, inform the logs
-                    let _ = self.run(task, actual_task).await;
-                }
-                None => {
-                    // Listen to watchable future
-                    // All that until a max timeout
-                    match &mut self.shutdown {
-                        Some(recv) => {
-                            // Listen to watchable future
-                            // All that until a max timeout
-                            select! {
-                                _ = recv.changed().fuse() => {
-                                    log::info!("Shutting down worker");
-                                    return Ok(());
-                                }
-                                _ = tokio::time::sleep(std::time::Duration::from_secs(1)).fuse() => {}
-                            }
-                        }
-                        None => {
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        }
-                    };
-                }
-            };
-        }
-    }
-
-    #[cfg(test)]
-    pub async fn run_tasks_until_none(&mut self) -> Result<(), BackieError> {
-        loop {
-            match self.queue.pull_next_task(self.task_type.clone()).await? {
-                Some(task) => {
-                    let actual_task: Box<dyn RunnableTask> =
-                        serde_json::from_value(task.payload.clone()).unwrap();
-
-                    // check if task is scheduled or not
-                    if let Some(CronPattern(_)) = actual_task.cron() {
-                        // program task
-                        // self.queue.schedule_task(&*actual_task).await?;
-                    }
-                    // run scheduled task
-                    self.run(task, actual_task).await?;
-                }
-                None => {
-                    return Ok(());
-                }
-            };
-        }
     }
 }
 
