@@ -1,8 +1,7 @@
 use crate::errors::AsyncQueueError;
-use crate::runnable::RunnableTask;
 use crate::schema::backie_tasks;
 use crate::task::Task;
-use crate::task::{NewTask, TaskHash, TaskId, TaskType};
+use crate::task::{NewTask, TaskHash, TaskId};
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
@@ -43,14 +42,6 @@ impl Task {
         Ok(qty > 0)
     }
 
-    pub(crate) async fn remove_by_type(
-        connection: &mut AsyncPgConnection,
-        task_type: TaskType,
-    ) -> Result<u64, AsyncQueueError> {
-        let query = backie_tasks::table.filter(backie_tasks::task_type.eq(task_type));
-        Ok(diesel::delete(query).execute(connection).await? as u64)
-    }
-
     pub(crate) async fn find_by_id(
         connection: &mut AsyncPgConnection,
         id: TaskId,
@@ -67,10 +58,13 @@ impl Task {
         id: TaskId,
         error_message: &str,
     ) -> Result<Task, AsyncQueueError> {
+        let error = serde_json::json!({
+            "error": error_message,
+        });
         let query = backie_tasks::table.filter(backie_tasks::id.eq(id));
         Ok(diesel::update(query)
             .set((
-                backie_tasks::error_message.eq(error_message),
+                backie_tasks::error_info.eq(Some(error)),
                 backie_tasks::done_at.eq(Utc::now()),
             ))
             .get_result::<Task>(connection)
@@ -81,18 +75,22 @@ impl Task {
         connection: &mut AsyncPgConnection,
         id: TaskId,
         backoff_seconds: u32,
-        error: &str,
+        error_message: &str,
     ) -> Result<Task, AsyncQueueError> {
         use crate::schema::backie_tasks::dsl;
 
         let now = Utc::now();
         let scheduled_at = now + Duration::seconds(backoff_seconds as i64);
 
+        let error = serde_json::json!({
+            "error": error_message,
+        });
+
         let task = diesel::update(backie_tasks::table.filter(backie_tasks::id.eq(id)))
             .set((
-                backie_tasks::error_message.eq(error),
+                backie_tasks::error_info.eq(Some(error)),
                 backie_tasks::retries.eq(dsl::retries + 1),
-                backie_tasks::created_at.eq(scheduled_at),
+                backie_tasks::scheduled_at.eq(scheduled_at),
                 backie_tasks::running_at.eq::<Option<DateTime<Utc>>>(None),
             ))
             .get_result::<Task>(connection)
@@ -103,14 +101,14 @@ impl Task {
 
     pub(crate) async fn fetch_next_pending(
         connection: &mut AsyncPgConnection,
-        task_type: TaskType,
+        queue_name: &str,
     ) -> Option<Task> {
         backie_tasks::table
-            .filter(backie_tasks::created_at.lt(Utc::now())) // skip tasks scheduled for the future
+            .filter(backie_tasks::scheduled_at.lt(Utc::now())) // skip tasks scheduled for the future
             .order(backie_tasks::created_at.asc()) // get the oldest task first
             .filter(backie_tasks::running_at.is_null()) // that is not marked as running already
             .filter(backie_tasks::done_at.is_null()) // and not marked as done
-            .filter(backie_tasks::task_type.eq(task_type))
+            .filter(backie_tasks::queue_name.eq(queue_name))
             .limit(1)
             .for_update()
             .skip_locked()
@@ -143,38 +141,12 @@ impl Task {
 
     pub(crate) async fn insert(
         connection: &mut AsyncPgConnection,
-        runnable: &dyn RunnableTask,
+        new_task: NewTask,
     ) -> Result<Task, AsyncQueueError> {
-        let payload = serde_json::to_value(runnable)?;
-        match runnable.uniq() {
-            None => {
-                let new_task = NewTask::builder()
-                    .uniq_hash(None)
-                    .task_type(runnable.task_type())
-                    .payload(payload)
-                    .build();
-
-                Ok(diesel::insert_into(backie_tasks::table)
-                    .values(new_task)
-                    .get_result::<Task>(connection)
-                    .await?)
-            }
-            Some(hash) => match Self::find_by_uniq_hash(connection, hash.clone()).await {
-                Some(task) => Ok(task),
-                None => {
-                    let new_task = NewTask::builder()
-                        .uniq_hash(Some(hash))
-                        .task_type(runnable.task_type())
-                        .payload(payload)
-                        .build();
-
-                    Ok(diesel::insert_into(backie_tasks::table)
-                        .values(new_task)
-                        .get_result::<Task>(connection)
-                        .await?)
-                }
-            },
-        }
+        Ok(diesel::insert_into(backie_tasks::table)
+            .values(new_task)
+            .get_result::<Task>(connection)
+            .await?)
     }
 
     pub(crate) async fn find_by_uniq_hash(

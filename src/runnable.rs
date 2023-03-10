@@ -1,27 +1,34 @@
-use crate::queue::Queueable;
-use crate::task::TaskHash;
-use crate::task::TaskType;
-use crate::Scheduled;
+use crate::task::{CurrentTask, TaskHash};
 use async_trait::async_trait;
-use std::error::Error;
-
-pub const RETRIES_NUMBER: i32 = 5;
+use serde::{de::DeserializeOwned, ser::Serialize};
 
 /// Task that can be executed by the queue.
 ///
-/// The `RunnableTask` trait is used to define the behaviour of a task. You must implement this
+/// The `BackgroundTask` trait is used to define the behaviour of a task. You must implement this
 /// trait for all tasks you want to execute.
-#[typetag::serde(tag = "type")]
 #[async_trait]
-pub trait RunnableTask: Send + Sync {
-    /// Execute the task. This method should define its logic
-    async fn run(&self, queue: &mut dyn Queueable) -> Result<(), Box<dyn Error + Send + 'static>>;
+pub trait BackgroundTask: Serialize + DeserializeOwned + Sync + Send + 'static {
+    /// Unique name of the task.
+    ///
+    /// This MUST be unique for the whole application.
+    const TASK_NAME: &'static str;
 
-    /// Define the type of the task.
-    /// The `common` task type is used by default
-    fn task_type(&self) -> TaskType {
-        TaskType::default()
-    }
+    /// Task queue where this task will be executed.
+    ///
+    /// Used to define which workers are going to be executing this task. It uses the default
+    /// task queue if not changed.
+    const QUEUE: &'static str = "default";
+
+    /// Number of retries for tasks.
+    ///
+    /// By default, it is set to 5.
+    const MAX_RETRIES: i32 = 5;
+
+    /// The application data provided to this task at runtime.
+    type AppData: Clone + Send + 'static;
+
+    /// Execute the task. This method should define its logic
+    async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), anyhow::Error>;
 
     /// If set to true, no new tasks with the same metadata will be inserted
     /// By default it is set to false.
@@ -29,27 +36,10 @@ pub trait RunnableTask: Send + Sync {
         None
     }
 
-    /// This method defines if a task is periodic or it should be executed once in the future.
-    ///
-    /// Be careful it works only with the UTC timezone.
-    ///
-    /// Example:
-    ///
-    /// ```rust
-    /// fn cron(&self) -> Option<Scheduled> {
-    ///     let expression = "0/20 * * * Aug-Sep * 2022/1";
-    ///     Some(Scheduled::CronPattern(expression.to_string()))
-    /// }
-    ///```
-    /// In order to schedule  a task once, use the `Scheduled::ScheduleOnce` enum variant.
-    fn cron(&self) -> Option<Scheduled> {
-        None
-    }
-
     /// Define the maximum number of retries the task will be retried.
     /// By default the number of retries is 20.
     fn max_retries(&self) -> i32 {
-        RETRIES_NUMBER
+        Self::MAX_RETRIES
     }
 
     /// Define the backoff mode

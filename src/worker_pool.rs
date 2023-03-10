@@ -1,102 +1,200 @@
 use crate::errors::BackieError;
-use crate::queue::Queueable;
-use crate::task::TaskType;
-use crate::worker::Worker;
-use crate::RetentionMode;
-use async_recursion::async_recursion;
-use log::error;
+use crate::queue::Queue;
+use crate::worker::{runnable, ExecuteTaskFn};
+use crate::worker::{StateFn, Worker};
+use crate::{BackgroundTask, CurrentTask, PgTaskStore, RetentionMode};
+use std::collections::BTreeMap;
 use std::future::Future;
-use tokio::sync::watch::Receiver;
-use typed_builder::TypedBuilder;
+use std::sync::Arc;
+use tokio::task::JoinHandle;
 
-#[derive(TypedBuilder, Clone)]
-pub struct WorkerPool<AQueue>
+pub type AppDataFn<AppData> = Arc<dyn Fn(Queue) -> AppData + Send + Sync>;
+
+#[derive(Clone)]
+pub struct WorkerPool<AppData>
 where
-    AQueue: Queueable + Clone + Sync + 'static,
+    AppData: Clone + Send + 'static,
 {
-    #[builder(setter(into))]
-    /// the AsyncWorkerPool uses a queue to control the tasks that will be executed.
-    pub queue: AQueue,
+    /// Storage of tasks.
+    queue_store: Arc<PgTaskStore>, // TODO: make this generic/dynamic referenced
 
-    /// retention_mode controls if tasks should be persisted after execution
-    #[builder(default, setter(into))]
-    pub retention_mode: RetentionMode,
+    /// Queue used to spawn tasks.
+    queue: Queue,
 
-    /// the number of workers of the AsyncWorkerPool.
-    #[builder(setter(into))]
-    pub number_of_workers: u32,
+    /// Make possible to load the application data.
+    ///
+    /// The application data is loaded when the worker pool is started and is passed to the tasks.
+    /// The loading function accepts a queue instance in case the application data depends on it. This
+    /// is interesting for situations where the application wants to allow tasks to spawn other tasks.
+    application_data_fn: StateFn<AppData>,
 
-    /// The type of tasks that will be executed by `AsyncWorkerPool`.
-    #[builder(default, setter(into))]
-    pub task_type: Option<TaskType>,
+    /// The types of task the worker pool can execute and the loaders for them.
+    task_registry: BTreeMap<String, ExecuteTaskFn<AppData>>,
+
+    /// Number of workers that will be spawned per queue.
+    worker_queues: BTreeMap<String, (RetentionMode, u32)>,
 }
 
-// impl<TypedBuilderFields, Q> AsyncWorkerBuilder<TypedBuilderFields, Q>
-//     where
-//         TypedBuilderFields: Clone,
-//         Q: Queueable + Clone + Sync + 'static,
-// {
-//     pub fn with_graceful_shutdown<F>(self, signal: F) -> Self<TypedBuilderFields, Q>
-//         where
-//             F: Future<Output = ()>,
-//     {
-//         self
-//     }
-// }
-
-impl<AQueue> WorkerPool<AQueue>
+impl<AppData> WorkerPool<AppData>
 where
-    AQueue: Queueable + Clone + Sync + 'static,
+    AppData: Clone + Send + 'static,
 {
-    /// Starts the configured number of workers
-    /// This is necessary in order to execute tasks.
-    pub async fn start<F>(&mut self, graceful_shutdown: F) -> Result<(), BackieError>
+    /// Create a new worker pool.
+    pub fn new<A>(queue_store: PgTaskStore, application_data_fn: A) -> Self
+    where
+        A: Fn(Queue) -> AppData + Send + Sync + 'static,
+    {
+        let queue_store = Arc::new(queue_store);
+        let queue = Queue::new(queue_store.clone());
+        let application_data_fn = {
+            let queue = queue.clone();
+            move || application_data_fn(queue.clone())
+        };
+        Self {
+            queue_store,
+            queue,
+            application_data_fn: Arc::new(application_data_fn),
+            task_registry: BTreeMap::new(),
+            worker_queues: BTreeMap::new(),
+        }
+    }
+
+    /// Register a task type with the worker pool.
+    pub fn register_task_type<BT>(mut self, num_workers: u32, retention_mode: RetentionMode) -> Self
+    where
+        BT: BackgroundTask<AppData = AppData>,
+    {
+        self.worker_queues
+            .insert(BT::QUEUE.to_string(), (retention_mode, num_workers));
+        self.task_registry
+            .insert(BT::TASK_NAME.to_string(), Arc::new(runnable::<BT>));
+        self
+    }
+
+    pub async fn start<F>(
+        self,
+        graceful_shutdown: F,
+    ) -> Result<(JoinHandle<()>, Queue), BackieError>
     where
         F: Future<Output = ()> + Send + 'static,
     {
         let (tx, rx) = tokio::sync::watch::channel(());
-        for idx in 0..self.number_of_workers {
-            let pool = self.clone();
-            // TODO: the worker pool keeps track of the number of workers and spawns new workers as needed.
-            //       There should be always a minimum number of workers active waiting for tasks to execute
-            //       or for a gracefull shutdown.
-            tokio::spawn(Self::supervise_task(pool, rx.clone(), 0, idx));
+
+        // Spawn all individual workers per queue
+        for (queue_name, (retention_mode, num_workers)) in self.worker_queues.iter() {
+            for idx in 0..*num_workers {
+                let mut worker: Worker<AppData> = Worker::new(
+                    self.queue_store.clone(),
+                    queue_name.clone(),
+                    retention_mode.clone(),
+                    self.task_registry.clone(),
+                    self.application_data_fn.clone(),
+                    Some(rx.clone()),
+                );
+                let worker_name = format!("worker-{queue_name}-{idx}");
+                // TODO: grab the join handle for every worker for graceful shutdown
+                tokio::spawn(async move {
+                    worker.run_tasks().await;
+                    log::info!("Worker {} stopped", worker_name);
+                });
+            }
         }
-        graceful_shutdown.await;
-        tx.send(())?;
-        log::info!("Worker pool stopped gracefully");
-        Ok(())
+
+        Ok((
+            tokio::spawn(async move {
+                graceful_shutdown.await;
+                if let Err(err) = tx.send(()) {
+                    log::warn!("Failed to send shutdown signal to worker pool: {}", err);
+                } else {
+                    log::info!("Worker pool stopped gracefully");
+                }
+            }),
+            self.queue,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
+    use diesel_async::AsyncPgConnection;
+
+    #[derive(Clone, Debug)]
+    struct ApplicationContext {
+        app_name: String,
     }
 
-    #[async_recursion]
-    async fn supervise_task(
-        pool: WorkerPool<AQueue>,
-        receiver: Receiver<()>,
-        restarts: u64,
-        worker_number: u32,
-    ) {
-        let restarts = restarts + 1;
-
-        let inner_pool = pool.clone();
-        let inner_receiver = receiver.clone();
-
-        let join_handle = tokio::spawn(async move {
-            let mut worker: Worker<AQueue> = Worker::builder()
-                .queue(inner_pool.queue.clone())
-                .retention_mode(inner_pool.retention_mode)
-                .task_type(inner_pool.task_type.clone())
-                .shutdown(inner_receiver)
-                .build();
-
-            worker.run_tasks().await
-        });
-
-        if (join_handle.await).is_err() {
-            error!(
-                "Worker {} stopped. Restarting. the number of restarts {}",
-                worker_number, restarts,
-            );
-            Self::supervise_task(pool, receiver, restarts, worker_number).await;
+    impl ApplicationContext {
+        fn new() -> Self {
+            Self {
+                app_name: "Backie".to_string(),
+            }
         }
+
+        fn get_app_name(&self) -> String {
+            self.app_name.clone()
+        }
+    }
+
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    struct GreetingTask {
+        person: String,
+    }
+
+    #[async_trait]
+    impl BackgroundTask for GreetingTask {
+        const TASK_NAME: &'static str = "my_task";
+
+        type AppData = ApplicationContext;
+
+        async fn run(
+            &self,
+            task_info: CurrentTask,
+            app_context: Self::AppData,
+        ) -> Result<(), anyhow::Error> {
+            println!(
+                "[{}] Hello {}! I'm {}.",
+                task_info.id(),
+                self.person,
+                app_context.get_app_name()
+            );
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_worker_pool() {
+        let my_app_context = ApplicationContext::new();
+
+        let task_store = PgTaskStore::new(pool().await);
+
+        let (join_handle, queue) = WorkerPool::new(task_store, move |_| my_app_context.clone())
+            .register_task_type::<GreetingTask>(1, RetentionMode::RemoveDone)
+            .start(futures::future::ready(()))
+            .await
+            .unwrap();
+
+        queue
+            .enqueue(GreetingTask {
+                person: "Rafael".to_string(),
+            })
+            .await
+            .unwrap();
+
+        join_handle.await.unwrap();
+    }
+
+    async fn pool() -> Pool<AsyncPgConnection> {
+        let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(
+            option_env!("DATABASE_URL").expect("DATABASE_URL must be set"),
+        );
+        Pool::builder()
+            .max_size(1)
+            .min_idle(Some(1))
+            .build(manager)
+            .await
+            .unwrap()
     }
 }
