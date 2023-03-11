@@ -115,7 +115,7 @@ impl Task {
 
 #[derive(Insertable, Debug, Eq, PartialEq, Clone)]
 #[diesel(table_name = backie_tasks)]
-pub(crate) struct NewTask {
+pub struct NewTask {
     task_name: String,
     queue_name: String,
     uniq_hash: Option<TaskHash>,

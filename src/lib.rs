@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 /// Represents a schedule for scheduled tasks.
 ///
-/// It's used in the [`AsyncRunnable::cron`] and [`Runnable::cron`]
+/// It's used in the [`BackgroundTask::cron`]
 #[derive(Debug, Clone)]
 pub enum Scheduled {
     /// A cron pattern for a periodic task
@@ -38,8 +38,8 @@ impl Default for RetentionMode {
     }
 }
 
-pub use queue::PgTaskStore;
 pub use runnable::BackgroundTask;
+pub use store::{PgTaskStore, TaskStore};
 pub use task::CurrentTask;
 pub use worker_pool::WorkerPool;
 

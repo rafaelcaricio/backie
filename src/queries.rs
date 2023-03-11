@@ -1,7 +1,7 @@
 use crate::errors::AsyncQueueError;
 use crate::schema::backie_tasks;
 use crate::task::Task;
-use crate::task::{NewTask, TaskHash, TaskId};
+use crate::task::{NewTask, TaskId};
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
@@ -10,47 +10,12 @@ use diesel::ExpressionMethods;
 use diesel_async::{pg::AsyncPgConnection, RunQueryDsl};
 
 impl Task {
-    pub(crate) async fn remove_all(
-        connection: &mut AsyncPgConnection,
-    ) -> Result<u64, AsyncQueueError> {
-        Ok(diesel::delete(backie_tasks::table)
-            .execute(connection)
-            .await? as u64)
-    }
-
-    pub(crate) async fn remove_all_scheduled(
-        connection: &mut AsyncPgConnection,
-    ) -> Result<u64, AsyncQueueError> {
-        let query = backie_tasks::table.filter(backie_tasks::running_at.is_null());
-        Ok(diesel::delete(query).execute(connection).await? as u64)
-    }
-
     pub(crate) async fn remove(
         connection: &mut AsyncPgConnection,
         id: TaskId,
     ) -> Result<u64, AsyncQueueError> {
         let query = backie_tasks::table.filter(backie_tasks::id.eq(id));
         Ok(diesel::delete(query).execute(connection).await? as u64)
-    }
-
-    pub(crate) async fn remove_by_hash(
-        connection: &mut AsyncPgConnection,
-        task_hash: TaskHash,
-    ) -> Result<bool, AsyncQueueError> {
-        let query = backie_tasks::table.filter(backie_tasks::uniq_hash.eq(task_hash));
-        let qty = diesel::delete(query).execute(connection).await?;
-        Ok(qty > 0)
-    }
-
-    pub(crate) async fn find_by_id(
-        connection: &mut AsyncPgConnection,
-        id: TaskId,
-    ) -> Result<Task, AsyncQueueError> {
-        let task = backie_tasks::table
-            .filter(backie_tasks::id.eq(id))
-            .first::<Task>(connection)
-            .await?;
-        Ok(task)
     }
 
     pub(crate) async fn fail_with_message(
@@ -147,16 +112,5 @@ impl Task {
             .values(new_task)
             .get_result::<Task>(connection)
             .await?)
-    }
-
-    pub(crate) async fn find_by_uniq_hash(
-        connection: &mut AsyncPgConnection,
-        hash: TaskHash,
-    ) -> Option<Task> {
-        backie_tasks::table
-            .filter(backie_tasks::uniq_hash.eq(hash))
-            .first::<Task>(connection)
-            .await
-            .ok()
     }
 }

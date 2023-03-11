@@ -1,5 +1,6 @@
 use crate::errors::{AsyncQueueError, BackieError};
 use crate::runnable::BackgroundTask;
+use crate::store::TaskStore;
 use crate::task::{CurrentTask, Task, TaskState};
 use crate::{PgTaskStore, RetentionMode};
 use futures::future::FutureExt;
@@ -162,7 +163,7 @@ where
             Ok(_) => self.finalize_task(task, result).await?,
             Err(error) => {
                 if task.retries < task.max_retries {
-                    let backoff_seconds = 5; // TODO: runnable.backoff(task.retries as u32);
+                    let backoff_seconds = 5; // TODO: runnable_task.backoff(task.retries as u32);
 
                     log::debug!(
                         "Task {} failed to run and will be retried in {} seconds",
@@ -226,8 +227,6 @@ where
 mod async_worker_tests {
     use super::*;
     use async_trait::async_trait;
-    use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
-    use diesel_async::AsyncPgConnection;
     use serde::{Deserialize, Serialize};
 
     #[derive(thiserror::Error, Debug)]
@@ -331,17 +330,5 @@ mod async_worker_tests {
         async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), anyhow::Error> {
             Ok(())
         }
-    }
-
-    async fn pool() -> Pool<AsyncPgConnection> {
-        let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(
-            option_env!("DATABASE_URL").expect("DATABASE_URL must be set"),
-        );
-        Pool::builder()
-            .max_size(1)
-            .min_idle(Some(1))
-            .build(manager)
-            .await
-            .unwrap()
     }
 }

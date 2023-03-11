@@ -31,8 +31,9 @@ async fn main() {
 
     // Register the task types I want to use and start the worker pool
     let (join_handle, queue) = WorkerPool::new(task_store, move |_| my_app_context.clone())
-        .register_task_type::<MyTask>(1, RetentionMode::RemoveDone)
-        .register_task_type::<MyFailingTask>(1, RetentionMode::RemoveDone)
+        .register_task_type::<MyTask>()
+        .register_task_type::<MyFailingTask>()
+        .configure_queue("default", 3, RetentionMode::RemoveDone)
         .start(async move {
             let _ = rx.changed().await;
         })

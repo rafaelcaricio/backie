@@ -2,10 +2,39 @@ use crate::task::{CurrentTask, TaskHash};
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, ser::Serialize};
 
-/// Task that can be executed by the queue.
-///
-/// The `BackgroundTask` trait is used to define the behaviour of a task. You must implement this
+/// The [`BackgroundTask`] trait is used to define the behaviour of a task. You must implement this
 /// trait for all tasks you want to execute.
+///
+/// The [`BackgroundTask::TASK_NAME`] attribute must be unique for the whole application. This
+/// attribute is critical for reconstructing the task back from the database.
+///
+/// The [`BackgroundTask::AppData`] can be used to argument the task with application specific
+/// contextual information. This is useful for example to pass a database connection pool to the
+/// task or other application configuration.
+///
+/// The [`BackgroundTask::run`] method is the main method of the task. It is executed by the
+/// the task queue workers.
+///
+///
+/// # Example
+/// ```rust
+/// use async_trait::async_trait;
+/// use backie::{BackgroundTask, CurrentTask};
+/// use serde::{Deserialize, Serialize};
+///
+/// #[derive(Serialize, Deserialize)]
+/// pub struct MyTask {}
+///
+/// impl BackgroundTask for MyTask {
+///     const TASK_NAME: &'static str = "my_task_unique_name";
+///     type AppData = ();
+///
+///     async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), anyhow::Error> {
+///         // Do something
+///         Ok(())
+///     }
+/// }
+/// ```
 #[async_trait]
 pub trait BackgroundTask: Serialize + DeserializeOwned + Sync + Send + 'static {
     /// Unique name of the task.
@@ -15,7 +44,7 @@ pub trait BackgroundTask: Serialize + DeserializeOwned + Sync + Send + 'static {
 
     /// Task queue where this task will be executed.
     ///
-    /// Used to define which workers are going to be executing this task. It uses the default
+    /// Used to route to which workers are going to be executing this task. It uses the default
     /// task queue if not changed.
     const QUEUE: &'static str = "default";
 

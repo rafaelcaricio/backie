@@ -18,12 +18,3 @@ CREATE TABLE backie_tasks (
 
 --- create uniqueness index
 CREATE UNIQUE INDEX backie_tasks_uniq_hash_index ON backie_tasks(uniq_hash) WHERE uniq_hash IS NOT NULL;
-
-CREATE FUNCTION backie_notify_new_tasks() returns trigger as $$
-BEGIN
-    perform pg_notify('backie::tasks', 'created');
-    return new;
-END;
-$$ language plpgsql;
-
-CREATE TRIGGER backie_notify_workers after insert on backie_tasks for each statement execute procedure backie_notify_new_tasks();
