@@ -65,7 +65,7 @@ impl Task {
     pub(crate) async fn fetch_next_pending(
         connection: &mut AsyncPgConnection,
         queue_name: &str,
-        task_names: &Vec<String>,
+        task_names: &[String],
     ) -> Option<Task> {
         backie_tasks::table
             .filter(backie_tasks::task_name.eq_any(task_names))

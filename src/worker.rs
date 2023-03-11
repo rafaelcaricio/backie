@@ -91,7 +91,7 @@ where
     }
 
     pub(crate) async fn run_tasks(&mut self) -> Result<(), BackieError> {
-        let registered_task_names = self.task_registry.keys().cloned().collect();
+        let registered_task_names = self.task_registry.keys().cloned().collect::<Vec<_>>();
         loop {
             // Check if has to stop before pulling next task
             if let Some(ref shutdown) = self.shutdown {

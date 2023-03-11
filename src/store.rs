@@ -22,7 +22,7 @@ impl TaskStore for PgTaskStore {
     async fn pull_next_task(
         &self,
         queue_name: &str,
-        task_names: &Vec<String>,
+        task_names: &[String],
     ) -> Result<Option<Task>, AsyncQueueError> {
         let mut connection = self
             .pool
@@ -114,7 +114,7 @@ pub mod test_store {
         async fn pull_next_task(
             &self,
             queue_name: &str,
-            task_names: &Vec<String>,
+            task_names: &[String],
         ) -> Result<Option<Task>, AsyncQueueError> {
             let mut tasks = self.tasks.lock().await;
             let mut next_task = None;
@@ -201,7 +201,7 @@ pub trait TaskStore: Clone + Send + Sync + 'static {
     async fn pull_next_task(
         &self,
         queue_name: &str,
-        task_names: &Vec<String>,
+        task_names: &[String],
     ) -> Result<Option<Task>, AsyncQueueError>;
     async fn create_task(&self, new_task: NewTask) -> Result<Task, AsyncQueueError>;
     async fn set_task_state(&self, id: TaskId, state: TaskState) -> Result<(), AsyncQueueError>;
