@@ -44,6 +44,7 @@ If you are not already using, you will also want to include the following depend
 ```toml
 [dependencies]
 async-trait = "0.1"
+anyhow = "1"
 serde = { version = "1.0", features = ["derive"] }
 diesel = { version = "2.0", features = ["postgres", "serde_json", "chrono", "uuid"] }
 diesel-async = { version = "0.2", features = ["postgres", "bb8"] }
@@ -130,12 +131,18 @@ We also defined in the `start` method that the worker pool should run forever.
 
 ### Queueing tasks
 
-After stating the workers we get an instance of [`Queue`] which we can use to enqueue tasks:
+After stating the workers we get an instance of [`Queue`] which we can use to enqueue tasks. It is also possible
+to directly create a [`Queue`] instance from with a [`TaskStore`] instance.
 
 ```rust
+let queue = Queue::new(task_store);
 let task = MyTask { info: "Hello world!".to_string() };
 queue.enqueue(task).await.unwrap();
 ```
+
+This will enqueue the task and whenever a worker is available it will start processing it. Workers don't need to be
+started before enqueuing tasks. Workers don't need to be in the same process as the queue as long as the workers have
+access to the same underlying storage system.
 
 ## Contributing
 

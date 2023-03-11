@@ -5,6 +5,7 @@ use crate::store::TaskStore;
 use crate::worker::{runnable, ExecuteTaskFn};
 use crate::worker::{StateFn, Worker};
 use crate::RetentionMode;
+use futures::future::join_all;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -106,6 +107,8 @@ where
 
         let (tx, rx) = tokio::sync::watch::channel(());
 
+        let mut worker_handles = Vec::new();
+
         // Spawn all individual workers per queue
         for (queue_name, (retention_mode, num_workers)) in self.worker_queues.iter() {
             for idx in 0..*num_workers {
@@ -118,13 +121,14 @@ where
                     Some(rx.clone()),
                 );
                 let worker_name = format!("worker-{queue_name}-{idx}");
-                // TODO: grab the join handle for every worker for graceful shutdown
-                tokio::spawn(async move {
+                // grabs the join handle for every worker for graceful shutdown
+                let join_handle = tokio::spawn(async move {
                     match worker.run_tasks().await {
                         Ok(()) => log::info!("Worker {worker_name} stopped successfully"),
                         Err(err) => log::error!("Worker {worker_name} stopped due to error: {err}"),
                     }
                 });
+                worker_handles.push(join_handle);
             }
         }
 
@@ -134,7 +138,18 @@ where
                 if let Err(err) = tx.send(()) {
                     log::warn!("Failed to send shutdown signal to worker pool: {}", err);
                 } else {
-                    log::info!("Worker pool stopped gracefully");
+                    // Wait for all workers to finish processing
+                    let results = join_all(worker_handles)
+                        .await
+                        .into_iter()
+                        .filter(Result::is_err)
+                        .map(Result::unwrap_err)
+                        .collect::<Vec<_>>();
+                    if !results.is_empty() {
+                        log::error!("Worker pool stopped with errors: {:?}", results);
+                    } else {
+                        log::info!("Worker pool stopped gracefully");
+                    }
                 }
             }),
             self.queue,

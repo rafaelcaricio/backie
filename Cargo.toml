@@ -5,6 +5,7 @@ authors = [
     "Rafael Caricio <rafael@caricio.com>",
 ]
 description = "Async persistent background task processing for Rust applications with Tokio and PostgreSQL."
+keywords = ["async", "background", "task", "jobs", "queue", "diesel", "postgres", "postgresql", "tokio"]
 repository = "https://code.caric.io/rafaelcaricio/backie"
 edition = "2021"
 license = "MIT"
