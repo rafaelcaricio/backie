@@ -31,3 +31,6 @@ diesel = { version = "2.0", features = ["postgres", "serde_json", "chrono", "uui
 diesel-derive-newtype = "2.0.0-rc.0"
 diesel-async = { version = "0.2", features = ["postgres", "bb8"] }
 tokio = { version = "1.25", features = ["rt", "time", "macros"] }
+
+[dev-dependencies]
+itertools = "0.10"

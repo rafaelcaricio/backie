@@ -2,7 +2,7 @@ use crate::errors::{AsyncQueueError, BackieError};
 use crate::runnable::BackgroundTask;
 use crate::store::TaskStore;
 use crate::task::{CurrentTask, Task, TaskState};
-use crate::{PgTaskStore, RetentionMode};
+use crate::RetentionMode;
 use futures::future::FutureExt;
 use futures::select;
 use std::collections::BTreeMap;
@@ -48,11 +48,12 @@ where
 }
 
 /// Worker that executes tasks.
-pub struct Worker<AppData>
+pub struct Worker<AppData, S>
 where
     AppData: Clone + Send + 'static,
+    S: TaskStore,
 {
-    store: Arc<PgTaskStore>,
+    store: Arc<S>,
 
     queue_name: String,
 
@@ -66,12 +67,13 @@ where
     shutdown: Option<tokio::sync::watch::Receiver<()>>,
 }
 
-impl<AppData> Worker<AppData>
+impl<AppData, S> Worker<AppData, S>
 where
     AppData: Clone + Send + 'static,
+    S: TaskStore,
 {
     pub(crate) fn new(
-        store: Arc<PgTaskStore>,
+        store: Arc<S>,
         queue_name: String,
         retention_mode: RetentionMode,
         task_registry: BTreeMap<String, ExecuteTaskFn<AppData>>,

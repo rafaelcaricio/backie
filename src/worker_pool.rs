@@ -1,25 +1,26 @@
 use crate::errors::BackieError;
 use crate::queue::Queue;
+use crate::runnable::BackgroundTask;
+use crate::store::TaskStore;
 use crate::worker::{runnable, ExecuteTaskFn};
 use crate::worker::{StateFn, Worker};
-use crate::{BackgroundTask, PgTaskStore, RetentionMode};
+use crate::RetentionMode;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 
-pub type AppDataFn<AppData> = Arc<dyn Fn(Queue) -> AppData + Send + Sync>;
-
 #[derive(Clone)]
-pub struct WorkerPool<AppData>
+pub struct WorkerPool<AppData, S>
 where
     AppData: Clone + Send + 'static,
+    S: TaskStore,
 {
     /// Storage of tasks.
-    queue_store: Arc<PgTaskStore>, // TODO: make this generic/dynamic referenced
+    task_store: Arc<S>,
 
     /// Queue used to spawn tasks.
-    queue: Queue,
+    queue: Queue<S>,
 
     /// Make possible to load the application data.
     ///
@@ -38,14 +39,15 @@ where
     worker_queues: BTreeMap<String, (RetentionMode, u32)>,
 }
 
-impl<AppData> WorkerPool<AppData>
+impl<AppData, S> WorkerPool<AppData, S>
 where
     AppData: Clone + Send + 'static,
+    S: TaskStore,
 {
     /// Create a new worker pool.
-    pub fn new<A>(task_store: PgTaskStore, application_data_fn: A) -> Self
+    pub fn new<A>(task_store: S, application_data_fn: A) -> Self
     where
-        A: Fn(Queue) -> AppData + Send + Sync + 'static,
+        A: Fn(Queue<S>) -> AppData + Send + Sync + 'static,
     {
         let queue_store = Arc::new(task_store);
         let queue = Queue::new(queue_store.clone());
@@ -54,7 +56,7 @@ where
             move || application_data_fn(queue.clone())
         };
         Self {
-            queue_store,
+            task_store: queue_store,
             queue,
             application_data_fn: Arc::new(application_data_fn),
             task_registry: BTreeMap::new(),
@@ -91,7 +93,7 @@ where
     pub async fn start<F>(
         self,
         graceful_shutdown: F,
-    ) -> Result<(JoinHandle<()>, Queue), BackieError>
+    ) -> Result<(JoinHandle<()>, Queue<S>), BackieError>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -107,8 +109,8 @@ where
         // Spawn all individual workers per queue
         for (queue_name, (retention_mode, num_workers)) in self.worker_queues.iter() {
             for idx in 0..*num_workers {
-                let mut worker: Worker<AppData> = Worker::new(
-                    self.queue_store.clone(),
+                let mut worker: Worker<AppData, S> = Worker::new(
+                    self.task_store.clone(),
                     queue_name.clone(),
                     retention_mode.clone(),
                     self.task_registry.clone(),
@@ -143,7 +145,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::test_store::MemoryTaskStore;
+    use crate::store::PgTaskStore;
     use crate::task::CurrentTask;
+    use anyhow::Error;
     use async_trait::async_trait;
     use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
     use diesel_async::AsyncPgConnection;
@@ -191,11 +196,32 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+    struct OtherTask;
+
+    #[async_trait]
+    impl BackgroundTask for OtherTask {
+        const TASK_NAME: &'static str = "other_task";
+
+        const QUEUE: &'static str = "other_queue";
+
+        type AppData = ApplicationContext;
+
+        async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), Error> {
+            println!(
+                "[{}] Other task with {}!",
+                task.id(),
+                context.get_app_name()
+            );
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     async fn validate_all_registered_tasks_queues_are_configured() {
         let my_app_context = ApplicationContext::new();
 
-        let result = WorkerPool::new(task_store().await, move |_| my_app_context.clone())
+        let result = WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
             .register_task_type::<GreetingTask>()
             .start(futures::future::ready(()))
             .await;
@@ -210,11 +236,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_worker_pool() {
+    async fn test_worker_pool_with_task() {
         let my_app_context = ApplicationContext::new();
 
         let (join_handle, queue) =
-            WorkerPool::new(task_store().await, move |_| my_app_context.clone())
+            WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
                 .register_task_type::<GreetingTask>()
                 .configure_queue(GreetingTask::QUEUE, 1, RetentionMode::RemoveDone)
                 .start(futures::future::ready(()))
@@ -231,7 +257,53 @@ mod tests {
         join_handle.await.unwrap();
     }
 
-    async fn task_store() -> PgTaskStore {
+    #[tokio::test]
+    async fn test_worker_pool_with_multiple_task_types() {
+        let my_app_context = ApplicationContext::new();
+
+        let (join_handle, queue) =
+            WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
+                .register_task_type::<GreetingTask>()
+                .register_task_type::<OtherTask>()
+                .configure_queue("default", 1, RetentionMode::default())
+                .configure_queue("other_queue", 1, RetentionMode::default())
+                .start(futures::future::ready(()))
+                .await
+                .unwrap();
+
+        queue
+            .enqueue(GreetingTask {
+                person: "Rafael".to_string(),
+            })
+            .await
+            .unwrap();
+
+        queue.enqueue(OtherTask).await.unwrap();
+
+        join_handle.await.unwrap();
+    }
+
+    async fn memory_store() -> MemoryTaskStore {
+        MemoryTaskStore::new()
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn test_worker_pool_with_pg_store() {
+        let my_app_context = ApplicationContext::new();
+
+        let (join_handle, _queue) =
+            WorkerPool::new(pg_task_store().await, move |_| my_app_context.clone())
+                .register_task_type::<GreetingTask>()
+                .configure_queue(GreetingTask::QUEUE, 1, RetentionMode::RemoveDone)
+                .start(futures::future::ready(()))
+                .await
+                .unwrap();
+
+        join_handle.await.unwrap();
+    }
+
+    async fn pg_task_store() -> PgTaskStore {
         let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(
             option_env!("DATABASE_URL").expect("DATABASE_URL must be set"),
         );

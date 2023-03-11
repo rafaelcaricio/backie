@@ -38,6 +38,7 @@ impl TaskStore for PgTaskStore {
             })
             .await
     }
+
     async fn create_task(&self, new_task: NewTask) -> Result<Task, AsyncQueueError> {
         let mut connection = self
             .pool
@@ -46,6 +47,7 @@ impl TaskStore for PgTaskStore {
             .map_err(|e| QueryBuilderError(e.into()))?;
         Task::insert(&mut connection, new_task).await
     }
+
     async fn set_task_state(&self, id: TaskId, state: TaskState) -> Result<(), AsyncQueueError> {
         let mut connection = self
             .pool
@@ -53,14 +55,17 @@ impl TaskStore for PgTaskStore {
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
         match state {
-            TaskState::Done => Task::set_done(&mut connection, id).await?,
-            TaskState::Failed(error_msg) => {
-                Task::fail_with_message(&mut connection, id, &error_msg).await?
+            TaskState::Done => {
+                Task::set_done(&mut connection, id).await?;
             }
-            _ => return Ok(()),
+            TaskState::Failed(error_msg) => {
+                Task::fail_with_message(&mut connection, id, &error_msg).await?;
+            }
+            _ => (),
         };
         Ok(())
     }
+
     async fn remove_task(&self, id: TaskId) -> Result<u64, AsyncQueueError> {
         let mut connection = self
             .pool
@@ -70,6 +75,7 @@ impl TaskStore for PgTaskStore {
         let result = Task::remove(&mut connection, id).await?;
         Ok(result)
     }
+
     async fn schedule_task_retry(
         &self,
         id: TaskId,
@@ -86,8 +92,111 @@ impl TaskStore for PgTaskStore {
     }
 }
 
+#[cfg(test)]
+pub mod test_store {
+    use super::*;
+    use itertools::Itertools;
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    #[derive(Clone)]
+    pub struct MemoryTaskStore {
+        tasks: Arc<Mutex<BTreeMap<TaskId, Task>>>,
+    }
+
+    impl MemoryTaskStore {
+        pub fn new() -> Self {
+            MemoryTaskStore {
+                tasks: Arc::new(Mutex::new(BTreeMap::new())),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TaskStore for MemoryTaskStore {
+        async fn pull_next_task(&self, queue_name: &str) -> Result<Option<Task>, AsyncQueueError> {
+            let mut tasks = self.tasks.lock().await;
+            let mut next_task = None;
+            for (_, task) in tasks
+                .iter_mut()
+                .sorted_by(|a, b| a.1.created_at.cmp(&b.1.created_at))
+            {
+                if task.queue_name == queue_name && task.state() == TaskState::Ready {
+                    task.running_at = Some(chrono::Utc::now());
+                    next_task = Some(task.clone());
+                    break;
+                }
+            }
+            Ok(next_task)
+        }
+
+        async fn create_task(&self, new_task: NewTask) -> Result<Task, AsyncQueueError> {
+            let mut tasks = self.tasks.lock().await;
+            let task = Task::from(new_task);
+            tasks.insert(task.id, task.clone());
+            Ok(task)
+        }
+
+        async fn set_task_state(
+            &self,
+            id: TaskId,
+            state: TaskState,
+        ) -> Result<(), AsyncQueueError> {
+            let mut tasks = self.tasks.lock().await;
+            let task = tasks.get_mut(&id).unwrap();
+
+            use TaskState::*;
+            match state {
+                Done => task.done_at = Some(chrono::Utc::now()),
+                Failed(error_msg) => {
+                    let error_payload = serde_json::json!({
+                        "error": error_msg,
+                    });
+                    task.error_info = Some(error_payload);
+                    task.done_at = Some(chrono::Utc::now());
+                }
+                _ => {}
+            }
+
+            Ok(())
+        }
+
+        async fn remove_task(&self, id: TaskId) -> Result<u64, AsyncQueueError> {
+            let mut tasks = self.tasks.lock().await;
+            let res = tasks.remove(&id);
+            if res.is_some() {
+                Ok(1)
+            } else {
+                Ok(0)
+            }
+        }
+
+        async fn schedule_task_retry(
+            &self,
+            id: TaskId,
+            backoff_seconds: u32,
+            error: &str,
+        ) -> Result<Task, AsyncQueueError> {
+            let mut tasks = self.tasks.lock().await;
+            let task = tasks.get_mut(&id).unwrap();
+
+            let error_payload = serde_json::json!({
+                "error": error,
+            });
+            task.error_info = Some(error_payload);
+            task.running_at = None;
+            task.retries += 1;
+            task.scheduled_at =
+                chrono::Utc::now() + chrono::Duration::seconds(backoff_seconds as i64);
+
+            Ok(task.clone())
+        }
+    }
+}
+
 #[async_trait::async_trait]
-pub trait TaskStore {
+pub trait TaskStore: Clone + Send + Sync + 'static {
     async fn pull_next_task(&self, queue_name: &str) -> Result<Option<Task>, AsyncQueueError>;
     async fn create_task(&self, new_task: NewTask) -> Result<Task, AsyncQueueError>;
     async fn set_task_state(&self, id: TaskId, state: TaskState) -> Result<(), AsyncQueueError>;

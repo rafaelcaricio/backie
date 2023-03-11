@@ -28,7 +28,7 @@ pub enum TaskState {
     Done,
 }
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, DieselNewType, Serialize)]
+#[derive(Clone, Copy, Debug, Ord, PartialOrd, Hash, PartialEq, Eq, DieselNewType, Serialize)]
 pub struct TaskId(Uuid);
 
 impl Display for TaskId {
@@ -141,6 +141,27 @@ impl NewTask {
             timeout_msecs: timeout.as_millis() as i64,
             max_retries,
         })
+    }
+}
+
+#[cfg(test)]
+impl From<NewTask> for Task {
+    fn from(new_task: NewTask) -> Self {
+        Self {
+            id: TaskId(Uuid::new_v4()),
+            task_name: new_task.task_name,
+            queue_name: new_task.queue_name,
+            uniq_hash: new_task.uniq_hash,
+            payload: new_task.payload,
+            timeout_msecs: new_task.timeout_msecs,
+            created_at: Utc::now(),
+            scheduled_at: Utc::now(),
+            running_at: None,
+            done_at: None,
+            error_info: None,
+            retries: 0,
+            max_retries: new_task.max_retries,
+        }
     }
 }
 

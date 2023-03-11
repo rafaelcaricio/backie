@@ -44,9 +44,6 @@ impl Task {
     ) -> Result<Task, AsyncQueueError> {
         use crate::schema::backie_tasks::dsl;
 
-        let now = Utc::now();
-        let scheduled_at = now + Duration::seconds(backoff_seconds as i64);
-
         let error = serde_json::json!({
             "error": error_message,
         });
@@ -55,7 +52,8 @@ impl Task {
             .set((
                 backie_tasks::error_info.eq(Some(error)),
                 backie_tasks::retries.eq(dsl::retries + 1),
-                backie_tasks::scheduled_at.eq(scheduled_at),
+                backie_tasks::scheduled_at
+                    .eq(Utc::now() + Duration::seconds(backoff_seconds as i64)),
                 backie_tasks::running_at.eq::<Option<DateTime<Utc>>>(None),
             ))
             .get_result::<Task>(connection)
