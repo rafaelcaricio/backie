@@ -112,7 +112,7 @@ where
                 let mut worker: Worker<AppData, S> = Worker::new(
                     self.task_store.clone(),
                     queue_name.clone(),
-                    retention_mode.clone(),
+                    *retention_mode,
                     self.task_registry.clone(),
                     self.application_data_fn.clone(),
                     Some(rx.clone()),
@@ -284,7 +284,7 @@ mod tests {
     }
 
     async fn memory_store() -> MemoryTaskStore {
-        MemoryTaskStore::new()
+        MemoryTaskStore::default()
     }
 
     #[tokio::test]

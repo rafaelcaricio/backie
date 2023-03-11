@@ -100,17 +100,9 @@ pub mod test_store {
     use std::sync::Arc;
     use tokio::sync::Mutex;
 
-    #[derive(Clone)]
+    #[derive(Default, Clone)]
     pub struct MemoryTaskStore {
         tasks: Arc<Mutex<BTreeMap<TaskId, Task>>>,
-    }
-
-    impl MemoryTaskStore {
-        pub fn new() -> Self {
-            MemoryTaskStore {
-                tasks: Arc::new(Mutex::new(BTreeMap::new())),
-            }
-        }
     }
 
     #[async_trait::async_trait]

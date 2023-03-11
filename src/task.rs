@@ -5,7 +5,6 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel_derive_newtype::DieselNewType;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Display;
@@ -41,15 +40,8 @@ impl Display for TaskId {
 pub struct TaskHash(Cow<'static, str>);
 
 impl TaskHash {
-    pub fn default_for_task<T>(value: &T) -> Result<Self, serde_json::Error>
-    where
-        T: Serialize,
-    {
-        let value = serde_json::to_value(value)?;
-        let mut hasher = Sha256::new();
-        hasher.update(serde_json::to_string(&value)?.as_bytes());
-        let result = hasher.finalize();
-        Ok(TaskHash(Cow::from(hex::encode(result))))
+    pub fn new<T: Into<String>>(hash: T) -> Self {
+        TaskHash(Cow::Owned(hash.into()))
     }
 }
 
@@ -174,7 +166,7 @@ pub struct CurrentTask {
 impl CurrentTask {
     pub(crate) fn new(task: &Task) -> Self {
         Self {
-            id: task.id.clone(),
+            id: task.id,
             retries: task.retries,
             created_at: task.created_at,
         }
