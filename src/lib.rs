@@ -19,21 +19,23 @@ pub enum RetentionMode {
 
 impl Default for RetentionMode {
     fn default() -> Self {
-        Self::RemoveAll
+        Self::RemoveDone
     }
 }
 
 pub use runnable::BackgroundTask;
 pub use store::{PgTaskStore, TaskStore};
-pub use task::CurrentTask;
+pub use task::{CurrentTask, Task, TaskId, TaskState};
 pub use worker_pool::WorkerPool;
+pub use worker::Worker;
+pub use queue::Queue;
 
 pub mod errors;
 mod queries;
-pub mod queue;
-pub mod runnable;
+mod queue;
+mod runnable;
 mod schema;
-pub mod store;
-pub mod task;
-pub mod worker;
-pub mod worker_pool;
+mod store;
+mod task;
+mod worker;
+mod worker_pool;

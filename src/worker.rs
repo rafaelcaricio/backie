@@ -91,6 +91,7 @@ where
     }
 
     pub(crate) async fn run_tasks(&mut self) -> Result<(), BackieError> {
+        let registered_task_names = self.task_registry.keys().cloned().collect();
         loop {
             // Check if has to stop before pulling next task
             if let Some(ref shutdown) = self.shutdown {
@@ -99,7 +100,11 @@ where
                 }
             };
 
-            match self.store.pull_next_task(&self.queue_name).await? {
+            match self
+                .store
+                .pull_next_task(&self.queue_name, &registered_task_names)
+                .await?
+            {
                 Some(task) => {
                     self.run(task).await?;
                 }
@@ -126,29 +131,6 @@ where
             };
         }
     }
-
-    // #[cfg(test)]
-    // pub async fn run_tasks_until_none(&mut self) -> Result<(), BackieError> {
-    //     loop {
-    //         match self.store.pull_next_task(self.queue_name.clone()).await? {
-    //             Some(task) => {
-    //                 let actual_task: Box<dyn BackgroundTask> =
-    //                     serde_json::from_value(task.payload.clone()).unwrap();
-    //
-    //                 // check if task is scheduled or not
-    //                 if let Some(CronPattern(_)) = actual_task.cron() {
-    //                     // program task
-    //                     // self.queue.schedule_task(&*actual_task).await?;
-    //                 }
-    //                 // run scheduled task
-    //                 self.run(task, actual_task).await?;
-    //             }
-    //             None => {
-    //                 return Ok(());
-    //             }
-    //         };
-    //     }
-    // }
 
     async fn run(&self, task: Task) -> Result<(), BackieError> {
         let task_info = CurrentTask::new(&task);

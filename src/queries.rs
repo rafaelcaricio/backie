@@ -65,8 +65,10 @@ impl Task {
     pub(crate) async fn fetch_next_pending(
         connection: &mut AsyncPgConnection,
         queue_name: &str,
+        task_names: &Vec<String>,
     ) -> Option<Task> {
         backie_tasks::table
+            .filter(backie_tasks::task_name.eq_any(task_names))
             .filter(backie_tasks::scheduled_at.lt(Utc::now())) // skip tasks scheduled for the future
             .order(backie_tasks::created_at.asc()) // get the oldest task first
             .filter(backie_tasks::running_at.is_null()) // that is not marked as running already

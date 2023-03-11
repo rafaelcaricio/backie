@@ -19,7 +19,11 @@ impl PgTaskStore {
 
 #[async_trait::async_trait]
 impl TaskStore for PgTaskStore {
-    async fn pull_next_task(&self, queue_name: &str) -> Result<Option<Task>, AsyncQueueError> {
+    async fn pull_next_task(
+        &self,
+        queue_name: &str,
+        task_names: &Vec<String>,
+    ) -> Result<Option<Task>, AsyncQueueError> {
         let mut connection = self
             .pool
             .get()
@@ -28,7 +32,7 @@ impl TaskStore for PgTaskStore {
         connection
             .transaction::<Option<Task>, AsyncQueueError, _>(|conn| {
                 async move {
-                    let Some(pending_task) = Task::fetch_next_pending(conn, queue_name).await else {
+                    let Some(pending_task) = Task::fetch_next_pending(conn, queue_name, task_names).await else {
                         return Ok(None);
                     };
 
@@ -107,11 +111,16 @@ pub mod test_store {
 
     #[async_trait::async_trait]
     impl TaskStore for MemoryTaskStore {
-        async fn pull_next_task(&self, queue_name: &str) -> Result<Option<Task>, AsyncQueueError> {
+        async fn pull_next_task(
+            &self,
+            queue_name: &str,
+            task_names: &Vec<String>,
+        ) -> Result<Option<Task>, AsyncQueueError> {
             let mut tasks = self.tasks.lock().await;
             let mut next_task = None;
             for (_, task) in tasks
                 .iter_mut()
+                .filter(|(_, task)| task_names.contains(&task.task_name))
                 .sorted_by(|a, b| a.1.created_at.cmp(&b.1.created_at))
             {
                 if task.queue_name == queue_name && task.state() == TaskState::Ready {
@@ -189,7 +198,11 @@ pub mod test_store {
 
 #[async_trait::async_trait]
 pub trait TaskStore: Clone + Send + Sync + 'static {
-    async fn pull_next_task(&self, queue_name: &str) -> Result<Option<Task>, AsyncQueueError>;
+    async fn pull_next_task(
+        &self,
+        queue_name: &str,
+        task_names: &Vec<String>,
+    ) -> Result<Option<Task>, AsyncQueueError>;
     async fn create_task(&self, new_task: NewTask) -> Result<Task, AsyncQueueError>;
     async fn set_task_state(&self, id: TaskId, state: TaskState) -> Result<(), AsyncQueueError>;
     async fn remove_task(&self, id: TaskId) -> Result<u64, AsyncQueueError>;

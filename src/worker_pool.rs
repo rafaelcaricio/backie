@@ -121,7 +121,7 @@ where
                 // TODO: grab the join handle for every worker for graceful shutdown
                 tokio::spawn(async move {
                     match worker.run_tasks().await {
-                        Ok(()) => log::info!("Worker {worker_name} stopped sucessfully"),
+                        Ok(()) => log::info!("Worker {worker_name} stopped successfully"),
                         Err(err) => log::error!("Worker {worker_name} stopped due to error: {err}"),
                     }
                 });
@@ -148,10 +148,10 @@ mod tests {
     use crate::store::test_store::MemoryTaskStore;
     use crate::store::PgTaskStore;
     use crate::task::CurrentTask;
-    use anyhow::Error;
     use async_trait::async_trait;
     use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
     use diesel_async::AsyncPgConnection;
+    use tokio::sync::Mutex;
 
     #[derive(Clone, Debug)]
     struct ApplicationContext {
@@ -207,12 +207,46 @@ mod tests {
 
         type AppData = ApplicationContext;
 
-        async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), Error> {
+        async fn run(
+            &self,
+            task: CurrentTask,
+            context: Self::AppData,
+        ) -> Result<(), anyhow::Error> {
             println!(
                 "[{}] Other task with {}!",
                 task.id(),
                 context.get_app_name()
             );
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct NotifyFinishedContext {
+        tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct NotifyFinished;
+
+    #[async_trait]
+    impl BackgroundTask for NotifyFinished {
+        const TASK_NAME: &'static str = "notify_finished";
+
+        type AppData = NotifyFinishedContext;
+
+        async fn run(
+            &self,
+            task: CurrentTask,
+            context: Self::AppData,
+        ) -> Result<(), anyhow::Error> {
+            match context.tx.lock().await.take() {
+                None => println!("Cannot notify, already done that!"),
+                Some(tx) => {
+                    tx.send(()).unwrap();
+                    println!("[{}] Notify finished did it's job!", task.id())
+                }
+            };
             Ok(())
         }
     }
@@ -279,6 +313,82 @@ mod tests {
             .unwrap();
 
         queue.enqueue(OtherTask).await.unwrap();
+
+        join_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_worker_pool_stop_after_task_execute() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        let my_app_context = NotifyFinishedContext {
+            tx: Arc::new(Mutex::new(Some(tx))),
+        };
+
+        let (join_handle, queue) =
+            WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
+                .register_task_type::<NotifyFinished>()
+                .configure_queue("default", 1, RetentionMode::default())
+                .start(async move {
+                    rx.await.unwrap();
+                    println!("Worker pool got notified to stop");
+                })
+                .await
+                .unwrap();
+
+        // Notifies the worker pool to stop after the task is executed
+        queue.enqueue(NotifyFinished).await.unwrap();
+
+        // This makes sure the task can run multiple times and use the shared context
+        queue.enqueue(NotifyFinished).await.unwrap();
+
+        join_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_worker_pool_try_to_run_unknown_task() {
+        #[derive(Clone, serde::Serialize, serde::Deserialize)]
+        struct UnknownTask;
+
+        #[async_trait]
+        impl BackgroundTask for UnknownTask {
+            const TASK_NAME: &'static str = "unknown_task";
+
+            type AppData = NotifyFinishedContext;
+
+            async fn run(
+                &self,
+                task: CurrentTask,
+                _context: Self::AppData,
+            ) -> Result<(), anyhow::Error> {
+                println!("[{}] Unknown task ran!", task.id());
+                Ok(())
+            }
+        }
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        let my_app_context = NotifyFinishedContext {
+            tx: Arc::new(Mutex::new(Some(tx))),
+        };
+
+        let task_store = memory_store().await;
+
+        let (join_handle, queue) = WorkerPool::new(task_store, move |_| my_app_context.clone())
+            .register_task_type::<NotifyFinished>()
+            .configure_queue("default", 1, RetentionMode::default())
+            .start(async move {
+                rx.await.unwrap();
+                println!("Worker pool got notified to stop");
+            })
+            .await
+            .unwrap();
+
+        // Enqueue a task that is not registered
+        queue.enqueue(UnknownTask).await.unwrap();
+
+        // Notifies the worker pool to stop for this test
+        queue.enqueue(NotifyFinished).await.unwrap();
 
         join_handle.await.unwrap();
     }

@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = [
     "Rafael Caricio <rafael@caricio.com>",
 ]
-description = "Async background task processing library with Tokio and Postgres"
+description = "Async persistent background task processing for Rust applications with Tokio and PostgreSQL."
 repository = "https://code.caric.io/rafaelcaricio/backie"
 edition = "2021"
 license = "MIT"

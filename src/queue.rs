@@ -17,7 +17,7 @@ impl<S> Queue<S>
 where
     S: TaskStore,
 {
-    pub(crate) fn new(task_store: Arc<S>) -> Self {
+    pub fn new(task_store: Arc<S>) -> Self {
         Queue { task_store }
     }
 
