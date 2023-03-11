@@ -145,7 +145,7 @@ queue.enqueue(task).await.unwrap();
 4. Push to the branch (`git push origin my-new-feature`)
 5. Create a new Pull Request
 
-## Thank related crates authors
+## Thanks to related crates authors
 
 I would like to thank the authors of the [Fang](https://github.com/ayrat555/fang) and [background_job](https://git.asonix.dog/asonix/background-jobs.git) crates which were the main inspiration for this project.
 
