@@ -106,7 +106,7 @@ pub mod test_store {
 
     #[derive(Default, Clone)]
     pub struct MemoryTaskStore {
-        tasks: Arc<Mutex<BTreeMap<TaskId, Task>>>,
+        pub tasks: Arc<Mutex<BTreeMap<TaskId, Task>>>,
     }
 
     #[async_trait::async_trait]

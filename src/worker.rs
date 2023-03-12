@@ -1,3 +1,4 @@
+use crate::catch_unwind::CatchUnwindFuture;
 use crate::errors::{AsyncQueueError, BackieError};
 use crate::runnable::BackgroundTask;
 use crate::store::TaskStore;
@@ -10,7 +11,6 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use thiserror::Error;
 
 pub type ExecuteTaskFn<AppData> = Arc<
     dyn Fn(
@@ -24,13 +24,16 @@ pub type ExecuteTaskFn<AppData> = Arc<
 
 pub type StateFn<AppData> = Arc<dyn Fn() -> AppData + Send + Sync>;
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum TaskExecError {
+    #[error("Task deserialization failed: {0}")]
+    TaskDeserializationFailed(#[from] serde_json::Error),
+
     #[error("Task execution failed: {0}")]
     ExecutionFailed(#[from] anyhow::Error),
 
-    #[error("Task deserialization failed: {0}")]
-    TaskDeserializationFailed(#[from] serde_json::Error),
+    #[error("Task panicked with: {0}")]
+    Panicked(String),
 }
 
 pub(crate) fn runnable<BT>(
@@ -144,9 +147,18 @@ where
             .get(&task.task_name)
             .ok_or_else(|| AsyncQueueError::TaskNotRegistered(task.task_name.clone()))?;
 
-        // TODO: catch panics
-        let result: Result<(), TaskExecError> =
-            runnable_task_caller(task_info, task.payload.clone(), (self.app_data_fn)()).await;
+        // catch panics
+        let result: Result<(), TaskExecError> = CatchUnwindFuture::create({
+            let task_payload = task.payload.clone();
+            let app_data = (self.app_data_fn)();
+            let runnable_task_caller = runnable_task_caller.clone();
+            async move { runnable_task_caller(task_info, task_payload, app_data).await }
+        })
+        .await
+        .and_then(|result| {
+            result?;
+            Ok(())
+        });
 
         match &result {
             Ok(_) => self.finalize_task(task, result).await?,
@@ -159,7 +171,9 @@ where
                         task.id,
                         backoff_seconds
                     );
+
                     let error_message = format!("{}", error);
+
                     self.store
                         .schedule_task_retry(task.id, backoff_seconds, &error_message)
                         .await?;

@@ -30,6 +30,7 @@ pub use task::{CurrentTask, Task, TaskId, TaskState};
 pub use worker::Worker;
 pub use worker_pool::{QueueConfig, WorkerPool};
 
+mod catch_unwind;
 pub mod errors;
 mod queries;
 mod queue;

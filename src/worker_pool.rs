@@ -379,7 +379,7 @@ mod tests {
         #[derive(Clone)]
         struct NotifyFinishedContext {
             /// Used to notify the task ran
-            tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+            notify_finished: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
         }
 
         /// A task that notifies the test that it ran
@@ -398,7 +398,7 @@ mod tests {
                 context: Self::AppData,
             ) -> Result<(), anyhow::Error> {
                 // Notify the test that the task ran
-                match context.tx.lock().await.take() {
+                match context.notify_finished.lock().await.take() {
                     None => println!("Cannot notify, already done that!"),
                     Some(tx) => {
                         tx.send(()).unwrap();
@@ -412,7 +412,7 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel();
 
         let my_app_context = NotifyFinishedContext {
-            tx: Arc::new(Mutex::new(Some(tx))),
+            notify_finished: Arc::new(Mutex::new(Some(tx))),
         };
 
         let (join_handle, queue) =
@@ -526,6 +526,57 @@ mod tests {
         assert!(
             !my_app_context.unknown_task_ran.load(Ordering::Relaxed),
             "Unknown task ran but it is not registered in the worker pool!"
+        );
+    }
+
+    #[tokio::test]
+    async fn task_can_panic_and_not_affect_worker() {
+        #[derive(Clone, serde::Serialize, serde::Deserialize)]
+        struct BrokenTask;
+
+        #[async_trait]
+        impl BackgroundTask for BrokenTask {
+            const TASK_NAME: &'static str = "panic_me";
+            type AppData = ();
+
+            async fn run(
+                &self,
+                _task: CurrentTask,
+                _context: Self::AppData,
+            ) -> Result<(), anyhow::Error> {
+                panic!("Oh no!");
+            }
+        }
+
+        let (notify_stop_worker_pool, should_stop) = tokio::sync::oneshot::channel();
+
+        let task_store = memory_store().await;
+
+        let (worker_pool_finished, queue) = WorkerPool::new(task_store.clone(), |_| ())
+            .register_task_type::<BrokenTask>()
+            .configure_queue("default".into())
+            .start(async move {
+                should_stop.await.unwrap();
+            })
+            .await
+            .unwrap();
+
+        // Enqueue a task that will panic
+        queue.enqueue(BrokenTask).await.unwrap();
+
+        notify_stop_worker_pool.send(()).unwrap();
+        worker_pool_finished.await.unwrap();
+
+        let raw_task = task_store
+            .tasks
+            .lock()
+            .await
+            .first_entry()
+            .unwrap()
+            .remove();
+        assert_eq!(
+            serde_json::to_string(&raw_task.error_info.unwrap()).unwrap(),
+            "{\"error\":\"Task panicked with: Oh no!\"}"
         );
     }
 
