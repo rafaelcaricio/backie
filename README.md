@@ -17,13 +17,14 @@ Backie started as a fork of
 
 Here are some of the Backie's key features:
 
-- Async workers: Workers are started as [Tokio](https://tokio.rs/) tasks
-- Application context: Tasks can access an shared user-provided application context
-- Single-purpose workers: Tasks are stored together but workers are configured to execute only tasks of a specific queue
-- Retries: Tasks are retried with a custom backoff mode
-- Graceful shutdown: provide a future to gracefully shutdown the workers, on-the-fly tasks are not interrupted
-- Recovery of unfinished tasks: Tasks that were not finished are retried on the next worker start
-- Unique tasks: Tasks are not duplicated in the queue if they provide a unique hash
+- **Guaranteed execution**: at least one execution of a task
+- **Async workers**: Workers are started as [Tokio](https://tokio.rs/) tasks
+- **Application context**: Tasks can access an shared user-provided application context
+- **Single-purpose workers**: Tasks are stored together but workers are configured to execute only tasks of a specific queue
+- **Retries**: Tasks are retried with a custom backoff mode
+- **Graceful shutdown**: provide a future to gracefully shutdown the workers, on-the-fly tasks are not interrupted
+- **Recovery of unfinished tasks**: Tasks that were not finished are retried on the next worker start
+- **Unique tasks**: Tasks are not duplicated in the queue if they provide a unique hash
 
 ## Other planned features
 
@@ -99,50 +100,19 @@ First, we need to create a [`TaskStore`] trait instance. This is the object resp
 tasks from a database. Backie currently only supports Postgres as a storage backend via the provided
 [`PgTaskStore`]. You can implement other storage backends by implementing the [`TaskStore`] trait.
 
-```rust
-let connection_url = "postgres://postgres:password@localhost/backie";
-
-let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(connection_url);
-let pool = Pool::builder()
-    .max_size(3)
-    .build(manager)
-    .await
-    .unwrap();
-
-let task_store = PgTaskStore::new(pool);
-```
-
 Then, we can use the `task_store` to start a worker pool using the [`WorkerPool`]. The [`WorkerPool`] is responsible
 for starting the workers and managing their lifecycle.
 
-```rust
-// Register the task types I want to use and start the worker pool
-let (_, queue) = WorkerPool::new(task_store, |_|())
-    .register_task_type::<MyTask>()
-    .configure_queue("default", 1, RetentionMode::default())
-    .start(futures::future::pending::<()>())
-    .await
-    .unwrap();
-```
-
-With that, we are defining that we want to execute instances of `MyTask` and that the `default` queue should 
-have 1 worker running using the default [`RetentionMode`] (remove from the database only successfully finished tasks).
-We also defined in the `start` method that the worker pool should run forever.
+A full example of starting a worker pool can be found in the [examples directory](https://github.com/rafaelcaricio/backie/blob/main/examples/simple_worker/src/main.rs).
 
 ### Queueing tasks
 
-After stating the workers we get an instance of [`Queue`] which we can use to enqueue tasks. It is also possible
+After stating the workers, we get an instance of [`Queue`] which we can use to enqueue tasks. It is also possible
 to directly create a [`Queue`] instance from with a [`TaskStore`] instance.
 
-```rust
-let queue = Queue::new(task_store);
-let task = MyTask { info: "Hello world!".to_string() };
-queue.enqueue(task).await.unwrap();
-```
-
-This will enqueue the task and whenever a worker is available it will start processing it. Workers don't need to be
+This will enqueue the task and whenever a worker is available it will start processing. Workers don't need to be
 started before enqueuing tasks. Workers don't need to be in the same process as the queue as long as the workers have
-access to the same underlying storage system.
+access to the same underlying storage system. This enables horizontal scaling of the workers.
 
 ## Contributing
 

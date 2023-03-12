@@ -17,7 +17,7 @@ use serde::{de::DeserializeOwned, ser::Serialize};
 ///
 ///
 /// # Example
-/// ```rust
+/// ```
 /// use async_trait::async_trait;
 /// use backie::{BackgroundTask, CurrentTask};
 /// use serde::{Deserialize, Serialize};
@@ -25,6 +25,7 @@ use serde::{de::DeserializeOwned, ser::Serialize};
 /// #[derive(Serialize, Deserialize)]
 /// pub struct MyTask {}
 ///
+/// #[async_trait]
 /// impl BackgroundTask for MyTask {
 ///     const TASK_NAME: &'static str = "my_task_unique_name";
 ///     type AppData = ();

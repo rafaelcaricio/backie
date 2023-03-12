@@ -5,7 +5,7 @@
 /// All possible options for retaining tasks in the db after their execution.
 ///
 /// The default mode is [`RetentionMode::RemoveAll`]
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 pub enum RetentionMode {
     /// Keep all tasks
     KeepAll,
@@ -28,7 +28,7 @@ pub use runnable::BackgroundTask;
 pub use store::{PgTaskStore, TaskStore};
 pub use task::{CurrentTask, Task, TaskId, TaskState};
 pub use worker::Worker;
-pub use worker_pool::WorkerPool;
+pub use worker_pool::{QueueConfig, WorkerPool};
 
 pub mod errors;
 mod queries;

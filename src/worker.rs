@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 
 pub type ExecuteTaskFn<AppData> = Arc<
@@ -59,6 +60,8 @@ where
 
     retention_mode: RetentionMode,
 
+    pull_interval: Duration,
+
     task_registry: BTreeMap<String, ExecuteTaskFn<AppData>>,
 
     app_data_fn: StateFn<AppData>,
@@ -76,6 +79,7 @@ where
         store: Arc<S>,
         queue_name: String,
         retention_mode: RetentionMode,
+        pull_interval: Duration,
         task_registry: BTreeMap<String, ExecuteTaskFn<AppData>>,
         app_data_fn: StateFn<AppData>,
         shutdown: Option<tokio::sync::watch::Receiver<()>>,
@@ -84,6 +88,7 @@ where
             store,
             queue_name,
             retention_mode,
+            pull_interval,
             task_registry,
             app_data_fn,
             shutdown,
@@ -120,11 +125,11 @@ where
                                     log::info!("Shutting down worker");
                                     return Ok(());
                                 }
-                                _ = tokio::time::sleep(std::time::Duration::from_secs(1)).fuse() => {}
+                                _ = tokio::time::sleep(self.pull_interval).fuse() => {}
                             }
                         }
                         None => {
-                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                            tokio::time::sleep(self.pull_interval).await;
                         }
                     };
                 }

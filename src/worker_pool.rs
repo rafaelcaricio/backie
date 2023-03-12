@@ -9,6 +9,7 @@ use futures::future::join_all;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::JoinHandle;
 
 #[derive(Clone)]
@@ -37,7 +38,7 @@ where
     queue_tasks: BTreeMap<String, Vec<String>>,
 
     /// Number of workers that will be spawned per queue.
-    worker_queues: BTreeMap<String, (RetentionMode, u32)>,
+    worker_queues: BTreeMap<String, QueueConfig>,
 }
 
 impl<AppData, S> WorkerPool<AppData, S>
@@ -80,14 +81,8 @@ where
         self
     }
 
-    pub fn configure_queue(
-        mut self,
-        queue_name: impl ToString,
-        num_workers: u32,
-        retention_mode: RetentionMode,
-    ) -> Self {
-        self.worker_queues
-            .insert(queue_name.to_string(), (retention_mode, num_workers));
+    pub fn configure_queue(mut self, config: QueueConfig) -> Self {
+        self.worker_queues.insert(config.name.clone(), config);
         self
     }
 
@@ -110,12 +105,13 @@ where
         let mut worker_handles = Vec::new();
 
         // Spawn all individual workers per queue
-        for (queue_name, (retention_mode, num_workers)) in self.worker_queues.iter() {
-            for idx in 0..*num_workers {
+        for (queue_name, queue_config) in self.worker_queues.iter() {
+            for idx in 0..queue_config.num_workers {
                 let mut worker: Worker<AppData, S> = Worker::new(
                     self.task_store.clone(),
                     queue_name.clone(),
-                    *retention_mode,
+                    queue_config.retention_mode,
+                    queue_config.pull_interval,
                     self.task_registry.clone(),
                     self.application_data_fn.clone(),
                     Some(rx.clone()),
@@ -154,6 +150,80 @@ where
             }),
             self.queue,
         ))
+    }
+}
+
+/// Configuration for a queue.
+///
+/// This is used to configure the number of workers, the retention mode, and the pulling interval
+/// for a queue.
+///
+/// # Examples
+///
+/// Example of configuring a queue with all options:
+/// ```
+/// # use backie::QueueConfig;
+/// # use backie::RetentionMode;
+/// # use std::time::Duration;
+/// let config = QueueConfig::new("default")
+///     .num_workers(5)
+///     .retention_mode(RetentionMode::KeepAll)
+///     .pull_interval(Duration::from_secs(1));
+/// ```
+/// Example of queue configuration with default options:
+/// ```
+/// # use backie::QueueConfig;
+/// let config = QueueConfig::new("default");
+/// // Also possible to use the `From` trait:
+/// let config: QueueConfig = "default".into();
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct QueueConfig {
+    name: String,
+    num_workers: u32,
+    retention_mode: RetentionMode,
+    pull_interval: Duration,
+}
+
+impl QueueConfig {
+    /// Create a new queue configuration.
+    pub fn new(name: impl ToString) -> Self {
+        Self {
+            name: name.to_string(),
+            num_workers: 1,
+            retention_mode: RetentionMode::default(),
+            pull_interval: Duration::from_secs(1),
+        }
+    }
+
+    /// Set the number of workers for this queue.
+    pub fn num_workers(mut self, num_workers: u32) -> Self {
+        self.num_workers = num_workers;
+        self
+    }
+
+    /// Set the retention mode for this queue.
+    pub fn retention_mode(mut self, retention_mode: RetentionMode) -> Self {
+        self.retention_mode = retention_mode;
+        self
+    }
+
+    /// Set the pull interval for this queue.
+    ///
+    /// This is the interval at which the queue will be checking for new tasks by calling
+    /// the backend storage.
+    pub fn pull_interval(mut self, pull_interval: Duration) -> Self {
+        self.pull_interval = pull_interval;
+        self
+    }
+}
+
+impl<S> From<S> for QueueConfig
+where
+    S: ToString,
+{
+    fn from(name: S) -> Self {
+        Self::new(name.to_string())
     }
 }
 
@@ -263,7 +333,7 @@ mod tests {
         let (join_handle, queue) =
             WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
                 .register_task_type::<GreetingTask>()
-                .configure_queue(GreetingTask::QUEUE, 1, RetentionMode::RemoveDone)
+                .configure_queue(GreetingTask::QUEUE.into())
                 .start(futures::future::ready(()))
                 .await
                 .unwrap();
@@ -286,8 +356,8 @@ mod tests {
             WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
                 .register_task_type::<GreetingTask>()
                 .register_task_type::<OtherTask>()
-                .configure_queue("default", 1, RetentionMode::default())
-                .configure_queue("other_queue", 1, RetentionMode::default())
+                .configure_queue("default".into())
+                .configure_queue("other_queue".into())
                 .start(futures::future::ready(()))
                 .await
                 .unwrap();
@@ -348,7 +418,7 @@ mod tests {
         let (join_handle, queue) =
             WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
                 .register_task_type::<NotifyFinished>()
-                .configure_queue("default", 1, RetentionMode::default())
+                .configure_queue("default".into())
                 .start(async move {
                     rx.await.unwrap();
                     println!("Worker pool got notified to stop");
@@ -437,7 +507,7 @@ mod tests {
             move |_| my_app_context.clone()
         })
         .register_task_type::<NotifyStopDuringRun>()
-        .configure_queue("default", 1, RetentionMode::default())
+        .configure_queue("default".into())
         .start(async move {
             rx.await.unwrap();
             println!("Worker pool got notified to stop");
@@ -530,7 +600,7 @@ mod tests {
             move |_| player_context.clone()
         })
         .register_task_type::<KeepAliveTask>()
-        .configure_queue("default", 1, RetentionMode::default())
+        .configure_queue("default".into())
         .start(async move {
             should_stop.await.unwrap();
             println!("Worker pool got notified to stop");
@@ -575,7 +645,9 @@ mod tests {
         let (join_handle, _queue) =
             WorkerPool::new(pg_task_store().await, move |_| my_app_context.clone())
                 .register_task_type::<GreetingTask>()
-                .configure_queue(GreetingTask::QUEUE, 1, RetentionMode::RemoveDone)
+                .configure_queue(
+                    QueueConfig::new(GreetingTask::QUEUE).retention_mode(RetentionMode::RemoveDone),
+                )
                 .start(futures::future::ready(()))
                 .await
                 .unwrap();

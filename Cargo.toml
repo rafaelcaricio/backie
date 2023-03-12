@@ -12,9 +12,6 @@ license = "MIT"
 readme = "README.md"
 rust-version = "1.67"
 
-[lib]
-doctest = false
-
 [dependencies]
 chrono = "0.4"
 log = "0.4"
