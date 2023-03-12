@@ -5,7 +5,7 @@ authors = [
     "Rafael Caricio <rafael@caricio.com>",
 ]
 description = "Background task processing for Rust applications with Tokio, Diesel, and PostgreSQL."
-keywords = ["async", "background", "task", "jobs", "queue", "diesel", "postgres", "postgresql", "tokio"]
+keywords = ["async", "background", "task", "jobs", "queue"]
 repository = "https://github.com/rafaelcaricio/backie"
 edition = "2021"
 license = "MIT"
