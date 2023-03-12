@@ -1,12 +1,12 @@
 [package]
 name = "backie"
-version = "0.1.0"
+version = "0.2.0"
 authors = [
     "Rafael Caricio <rafael@caricio.com>",
 ]
-description = "Async persistent background task processing for Rust applications with Tokio and PostgreSQL."
+description = "Background task processing for Rust applications with Tokio, Diesel, and PostgreSQL."
 keywords = ["async", "background", "task", "jobs", "queue", "diesel", "postgres", "postgresql", "tokio"]
-repository = "https://code.caric.io/rafaelcaricio/backie"
+repository = "https://github.com/rafaelcaricio/backie"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
