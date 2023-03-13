@@ -1,0 +1,23 @@
+allow-branch = [
+    "*",
+    "!HEAD",
+]
+sign-commit = true
+sign-tag = true
+push-remote = "origin"
+release = true
+publish = true
+verify = true
+owners = []
+push = true
+push-options = []
+consolidate-commits = false
+pre-release-commit-message = "Release {{crate_name}} version {{version}}"
+pre-release-replacements = []
+tag-message = "Release {{version}}"
+tag-name = "{{version}}"
+tag = true
+enable-features = []
+enable-all-features = false
+dependent-version = "upgrade"
+metadata = "optional"
