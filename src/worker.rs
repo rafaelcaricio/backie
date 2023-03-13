@@ -55,7 +55,7 @@ where
 pub struct Worker<AppData, S>
 where
     AppData: Clone + Send + 'static,
-    S: TaskStore,
+    S: TaskStore + Clone,
 {
     store: Arc<S>,
 
@@ -76,7 +76,7 @@ where
 impl<AppData, S> Worker<AppData, S>
 where
     AppData: Clone + Send + 'static,
-    S: TaskStore,
+    S: TaskStore + Clone,
 {
     pub(crate) fn new(
         store: Arc<S>,

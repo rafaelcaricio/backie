@@ -31,6 +31,14 @@ Here are some of the Backie's key features:
 - Task timeout: Tasks are retried if they are not completed in time
 - Scheduling of tasks: Tasks can be scheduled to be executed at a specific time
 
+## Safety
+
+This crate uses `#![forbid(unsafe_code)]` to ensure everything is implemented in 100% safe Rust.
+
+## Minimum supported Rust version
+
+Backie's MSRV is 1.68.
+
 ## Installation
 
 1. Add this to your `Cargo.toml`
@@ -53,8 +61,6 @@ diesel-async = { version = "0.2", features = ["postgres", "bb8"] }
 
 Those dependencies are required to use the `#[async_trait]` and `#[derive(Serialize, Deserialize)]` attributes
 in your task definitions and to connect to the Postgres database.
-
-*Supports rustc 1.68+*
 
 2. Create the `backie_tasks` table in the Postgres database. The migration can be found in [the migrations directory](https://github.com/rafaelcaricio/backie/blob/master/migrations/2023-03-06-151907_create_backie_tasks/up.sql).
 
@@ -114,6 +120,10 @@ This will enqueue the task and whenever a worker is available it will start proc
 started before enqueuing tasks. Workers don't need to be in the same process as the queue as long as the workers have
 access to the same underlying storage system. This enables horizontal scaling of the workers.
 
+## License
+
+This project is licensed under the [MIT license][license].
+
 ## Contributing
 
 1. [Fork it!](https://github.com/rafaelcaricio/backie/fork)
@@ -122,7 +132,7 @@ access to the same underlying storage system. This enables horizontal scaling of
 4. Push to the branch (`git push origin my-new-feature`)
 5. Create a new Pull Request
 
-## Thanks to related crates authors
+## Acknowledgements
 
 I would like to thank the authors of the [Fang](https://github.com/ayrat555/fang) and [background_job](https://git.asonix.dog/asonix/background-jobs.git) crates which were the main inspiration for this project.
 

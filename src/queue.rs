@@ -8,14 +8,14 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct Queue<S>
 where
-    S: TaskStore,
+    S: TaskStore + Clone,
 {
     task_store: Arc<S>,
 }
 
 impl<S> Queue<S>
 where
-    S: TaskStore,
+    S: TaskStore + Clone,
 {
     pub fn new(task_store: Arc<S>) -> Self {
         Queue { task_store }

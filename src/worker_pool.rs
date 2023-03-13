@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 pub struct WorkerPool<AppData, S>
 where
     AppData: Clone + Send + 'static,
-    S: TaskStore,
+    S: TaskStore + Clone,
 {
     /// Storage of tasks.
     task_store: Arc<S>,
@@ -44,7 +44,7 @@ where
 impl<AppData, S> WorkerPool<AppData, S>
 where
     AppData: Clone + Send + 'static,
-    S: TaskStore,
+    S: TaskStore + Clone,
 {
     /// Create a new worker pool.
     pub fn new<A>(task_store: S, application_data_fn: A) -> Self

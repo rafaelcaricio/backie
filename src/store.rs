@@ -197,7 +197,7 @@ pub mod test_store {
 }
 
 #[async_trait::async_trait]
-pub trait TaskStore: Clone + Send + Sync + 'static {
+pub trait TaskStore: Send + Sync + 'static {
     async fn pull_next_task(
         &self,
         queue_name: &str,
@@ -212,4 +212,16 @@ pub trait TaskStore: Clone + Send + Sync + 'static {
         backoff_seconds: u32,
         error: &str,
     ) -> Result<Task, AsyncQueueError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::test_store::MemoryTaskStore;
+
+    #[test]
+    fn task_store_trait_is_object_safe() {
+        let store = MemoryTaskStore::default();
+        let _object = &store as &dyn TaskStore;
+    }
 }
