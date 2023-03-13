@@ -34,8 +34,9 @@ impl MyTask {
 impl BackgroundTask for MyTask {
     const TASK_NAME: &'static str = "my_task";
     type AppData = MyApplicationContext;
+    type Error = anyhow::Error;
 
-    async fn run(&self, task: CurrentTask, ctx: Self::AppData) -> Result<(), anyhow::Error> {
+    async fn run(&self, task: CurrentTask, ctx: Self::AppData) -> Result<(), Self::Error> {
         // let new_task = MyTask::new(self.number + 1);
         // queue
         //     .insert_task(&new_task)
@@ -70,8 +71,9 @@ impl MyFailingTask {
 impl BackgroundTask for MyFailingTask {
     const TASK_NAME: &'static str = "my_failing_task";
     type AppData = MyApplicationContext;
+    type Error = anyhow::Error;
 
-    async fn run(&self, task: CurrentTask, _ctx: Self::AppData) -> Result<(), anyhow::Error> {
+    async fn run(&self, task: CurrentTask, _ctx: Self::AppData) -> Result<(), Self::Error> {
         // let new_task = MyFailingTask::new(self.number + 1);
         // queue
         //     .insert_task(&new_task)

@@ -53,7 +53,6 @@ If you are not already using, you will also want to include the following depend
 ```toml
 [dependencies]
 async-trait = "0.1"
-anyhow = "1"
 serde = { version = "1.0", features = ["derive"] }
 diesel = { version = "2.0", features = ["postgres", "serde_json", "chrono", "uuid"] }
 diesel-async = { version = "0.2", features = ["postgres", "bb8"] }
@@ -75,6 +74,9 @@ the whole application. This attribute is critical for reconstructing the task ba
 The [`BackgroundTask::AppData`] can be used to argument the task with your application specific contextual information.
 This is useful for example to pass a database connection pool to the task or other application configuration.
 
+The [`BackgroundTask::Error`] is the error type that will be returned by the [`BackgroundTask::run`] method. You can
+use this to define your own error type for your tasks.
+
 The [`BackgroundTask::run`] method is where you define the behaviour of your background task execution. This method
 will be called by the task queue workers.
 
@@ -92,8 +94,9 @@ pub struct MyTask {
 impl BackgroundTask for MyTask {
     const TASK_NAME: &'static str = "my_task_unique_name";
     type AppData = ();
+    type Error = ();
 
-    async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), anyhow::Error> {
+    async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), Self::Error> {
         // Do something
         Ok(())
     }

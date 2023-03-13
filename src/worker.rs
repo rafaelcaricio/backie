@@ -30,7 +30,7 @@ pub enum TaskExecError {
     TaskDeserializationFailed(#[from] serde_json::Error),
 
     #[error("Task execution failed: {0}")]
-    ExecutionFailed(#[from] anyhow::Error),
+    ExecutionFailed(String),
 
     #[error("Task panicked with: {0}")]
     Panicked(String),
@@ -46,8 +46,10 @@ where
 {
     Box::pin(async move {
         let background_task: BT = serde_json::from_value(payload)?;
-        background_task.run(task_info, app_context).await?;
-        Ok(())
+        match background_task.run(task_info, app_context).await {
+            Ok(_) => Ok(()),
+            Err(err) => Err(TaskExecError::ExecutionFailed(format!("{:?}", err))),
+        }
     })
 }
 
@@ -250,8 +252,9 @@ mod async_worker_tests {
     impl BackgroundTask for WorkerAsyncTask {
         const TASK_NAME: &'static str = "WorkerAsyncTask";
         type AppData = ();
+        type Error = ();
 
-        async fn run(&self, _: CurrentTask, _: Self::AppData) -> Result<(), anyhow::Error> {
+        async fn run(&self, _: CurrentTask, _: Self::AppData) -> Result<(), ()> {
             Ok(())
         }
     }
@@ -265,8 +268,9 @@ mod async_worker_tests {
     impl BackgroundTask for WorkerAsyncTaskSchedule {
         const TASK_NAME: &'static str = "WorkerAsyncTaskSchedule";
         type AppData = ();
+        type Error = ();
 
-        async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), anyhow::Error> {
+        async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), ()> {
             Ok(())
         }
 
@@ -284,11 +288,12 @@ mod async_worker_tests {
     impl BackgroundTask for AsyncFailedTask {
         const TASK_NAME: &'static str = "AsyncFailedTask";
         type AppData = ();
+        type Error = TaskError;
 
-        async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), anyhow::Error> {
+        async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), TaskError> {
             let message = format!("number {} is wrong :(", self.number);
 
-            Err(TaskError::Custom(message).into())
+            Err(TaskError::Custom(message))
         }
 
         fn max_retries(&self) -> i32 {
@@ -303,9 +308,10 @@ mod async_worker_tests {
     impl BackgroundTask for AsyncRetryTask {
         const TASK_NAME: &'static str = "AsyncRetryTask";
         type AppData = ();
+        type Error = TaskError;
 
-        async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), anyhow::Error> {
-            Err(TaskError::SomethingWrong.into())
+        async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), Self::Error> {
+            Err(TaskError::SomethingWrong)
         }
     }
 
@@ -316,8 +322,9 @@ mod async_worker_tests {
     impl BackgroundTask for AsyncTaskType1 {
         const TASK_NAME: &'static str = "AsyncTaskType1";
         type AppData = ();
+        type Error = ();
 
-        async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), anyhow::Error> {
+        async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), Self::Error> {
             Ok(())
         }
     }
@@ -329,8 +336,9 @@ mod async_worker_tests {
     impl BackgroundTask for AsyncTaskType2 {
         const TASK_NAME: &'static str = "AsyncTaskType2";
         type AppData = ();
+        type Error = ();
 
-        async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), anyhow::Error> {
+        async fn run(&self, _task: CurrentTask, _data: Self::AppData) -> Result<(), ()> {
             Ok(())
         }
     }

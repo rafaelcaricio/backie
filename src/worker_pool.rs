@@ -240,7 +240,7 @@ mod tests {
     use tokio::sync::Mutex;
 
     #[derive(Clone, Debug)]
-    struct ApplicationContext {
+    pub struct ApplicationContext {
         app_name: String,
     }
 
@@ -261,17 +261,50 @@ mod tests {
         person: String,
     }
 
+    /// This tests that one can customize the task parameters for the application.
     #[async_trait]
-    impl BackgroundTask for GreetingTask {
-        const TASK_NAME: &'static str = "my_task";
+    trait MyAppTask {
+        const TASK_NAME: &'static str;
+        const QUEUE: &'static str = "default";
+
+        async fn run(
+            &self,
+            task_info: CurrentTask,
+            app_context: ApplicationContext,
+        ) -> Result<(), ()>;
+    }
+
+    #[async_trait]
+    impl<T> BackgroundTask for T
+    where
+        T: MyAppTask + serde::de::DeserializeOwned + serde::ser::Serialize + Sync + Send + 'static,
+    {
+        const TASK_NAME: &'static str = T::TASK_NAME;
+
+        const QUEUE: &'static str = T::QUEUE;
 
         type AppData = ApplicationContext;
+
+        type Error = ();
 
         async fn run(
             &self,
             task_info: CurrentTask,
             app_context: Self::AppData,
-        ) -> Result<(), anyhow::Error> {
+        ) -> Result<(), Self::Error> {
+            self.run(task_info, app_context).await
+        }
+    }
+
+    #[async_trait]
+    impl MyAppTask for GreetingTask {
+        const TASK_NAME: &'static str = "my_task";
+
+        async fn run(
+            &self,
+            task_info: CurrentTask,
+            app_context: ApplicationContext,
+        ) -> Result<(), ()> {
             println!(
                 "[{}] Hello {}! I'm {}.",
                 task_info.id(),
@@ -292,12 +325,9 @@ mod tests {
         const QUEUE: &'static str = "other_queue";
 
         type AppData = ApplicationContext;
+        type Error = ();
 
-        async fn run(
-            &self,
-            task: CurrentTask,
-            context: Self::AppData,
-        ) -> Result<(), anyhow::Error> {
+        async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), Self::Error> {
             println!(
                 "[{}] Other task with {}!",
                 task.id(),
@@ -332,7 +362,7 @@ mod tests {
         let (join_handle, queue) =
             WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
                 .register_task_type::<GreetingTask>()
-                .configure_queue(GreetingTask::QUEUE.into())
+                .configure_queue(<GreetingTask as MyAppTask>::QUEUE.into())
                 .start(futures::future::ready(()))
                 .await
                 .unwrap();
@@ -391,11 +421,9 @@ mod tests {
 
             type AppData = NotifyFinishedContext;
 
-            async fn run(
-                &self,
-                task: CurrentTask,
-                context: Self::AppData,
-            ) -> Result<(), anyhow::Error> {
+            type Error = ();
+
+            async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), ()> {
                 // Notify the test that the task ran
                 match context.notify_finished.lock().await.take() {
                     None => println!("Cannot notify, already done that!"),
@@ -455,11 +483,13 @@ mod tests {
 
             type AppData = NotifyUnknownRanContext;
 
+            type Error = ();
+
             async fn run(
                 &self,
                 task: CurrentTask,
                 context: Self::AppData,
-            ) -> Result<(), anyhow::Error> {
+            ) -> Result<(), Self::Error> {
                 // Notify the test that the task ran
                 match context.should_stop.lock().await.take() {
                     None => println!("Cannot notify, already done that!"),
@@ -481,11 +511,9 @@ mod tests {
 
             type AppData = NotifyUnknownRanContext;
 
-            async fn run(
-                &self,
-                task: CurrentTask,
-                context: Self::AppData,
-            ) -> Result<(), anyhow::Error> {
+            type Error = ();
+
+            async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), ()> {
                 println!("[{}] Unknown task ran!", task.id());
                 context.unknown_task_ran.store(true, Ordering::Relaxed);
                 Ok(())
@@ -537,12 +565,9 @@ mod tests {
         impl BackgroundTask for BrokenTask {
             const TASK_NAME: &'static str = "panic_me";
             type AppData = ();
+            type Error = ();
 
-            async fn run(
-                &self,
-                _task: CurrentTask,
-                _context: Self::AppData,
-            ) -> Result<(), anyhow::Error> {
+            async fn run(&self, _task: CurrentTask, _context: Self::AppData) -> Result<(), ()> {
                 panic!("Oh no!");
             }
         }
@@ -609,11 +634,13 @@ mod tests {
 
             type AppData = PlayerContext;
 
+            type Error = ();
+
             async fn run(
                 &self,
                 _task: CurrentTask,
                 context: Self::AppData,
-            ) -> Result<(), anyhow::Error> {
+            ) -> Result<(), Self::Error> {
                 loop {
                     let msg = context.ping_rx.lock().await.recv().await.unwrap();
                     match msg {
@@ -696,7 +723,8 @@ mod tests {
             WorkerPool::new(pg_task_store().await, move |_| my_app_context.clone())
                 .register_task_type::<GreetingTask>()
                 .configure_queue(
-                    QueueConfig::new(GreetingTask::QUEUE).retention_mode(RetentionMode::RemoveDone),
+                    QueueConfig::new(<GreetingTask as MyAppTask>::QUEUE)
+                        .retention_mode(RetentionMode::RemoveDone),
                 )
                 .start(futures::future::ready(()))
                 .await

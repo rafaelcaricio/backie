@@ -1,6 +1,7 @@
 use crate::task::{CurrentTask, TaskHash};
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, ser::Serialize};
+use std::fmt::Debug;
 
 /// The [`BackgroundTask`] trait is used to define the behaviour of a task. You must implement this
 /// trait for all tasks you want to execute.
@@ -29,8 +30,9 @@ use serde::{de::DeserializeOwned, ser::Serialize};
 /// impl BackgroundTask for MyTask {
 ///     const TASK_NAME: &'static str = "my_task_unique_name";
 ///     type AppData = ();
+///     type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 ///
-///     async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), anyhow::Error> {
+///     async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), Self::Error> {
 ///         // Do something
 ///         Ok(())
 ///     }
@@ -57,8 +59,11 @@ pub trait BackgroundTask: Serialize + DeserializeOwned + Sync + Send + 'static {
     /// The application data provided to this task at runtime.
     type AppData: Clone + Send + 'static;
 
+    /// An application custom error type.
+    type Error: Debug + Send + 'static;
+
     /// Execute the task. This method should define its logic
-    async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), anyhow::Error>;
+    async fn run(&self, task: CurrentTask, context: Self::AppData) -> Result<(), Self::Error>;
 
     /// If set to true, no new tasks with the same metadata will be inserted
     /// By default it is set to false.
