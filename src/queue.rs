@@ -17,8 +17,10 @@ impl<S> Queue<S>
 where
     S: TaskStore + Clone,
 {
-    pub fn new(task_store: Arc<S>) -> Self {
-        Queue { task_store }
+    pub fn new(task_store: S) -> Self {
+        Queue {
+            task_store: Arc::new(task_store),
+        }
     }
 
     pub async fn enqueue<BT>(&self, background_task: BT) -> Result<(), BackieError>

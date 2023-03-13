@@ -4,7 +4,6 @@ use backie::{PgTaskStore, Queue, WorkerPool};
 use diesel_async::pg::AsyncPgConnection;
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -134,7 +133,7 @@ async fn main() {
     let task2 = MyTask::new(20_000);
     let task3 = MyFailingTask::new(50_000);
 
-    let queue = Queue::new(Arc::new(task_store)); // or use the `queue` instance returned by the worker pool
+    let queue = Queue::new(task_store); // or use the `queue` instance returned by the worker pool
     queue.enqueue(task1).await.unwrap();
     queue.enqueue(task2).await.unwrap();
     queue.enqueue(task3).await.unwrap();

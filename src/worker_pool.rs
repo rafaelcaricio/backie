@@ -51,14 +51,13 @@ where
     where
         A: Fn(Queue<S>) -> AppData + Send + Sync + 'static,
     {
-        let queue_store = Arc::new(task_store);
-        let queue = Queue::new(queue_store.clone());
+        let queue = Queue::new(task_store.clone());
         let application_data_fn = {
             let queue = queue.clone();
             move || application_data_fn(queue.clone())
         };
         Self {
-            task_store: queue_store,
+            task_store: Arc::new(task_store),
             queue,
             application_data_fn: Arc::new(application_data_fn),
             task_registry: BTreeMap::new(),
