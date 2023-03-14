@@ -1,5 +1,4 @@
 use crate::errors::BackieError;
-use crate::queue::Queue;
 use crate::runnable::BackgroundTask;
 use crate::store::TaskStore;
 use crate::worker::{runnable, ExecuteTaskFn};
@@ -19,10 +18,7 @@ where
     S: TaskStore + Clone,
 {
     /// Storage of tasks.
-    task_store: Arc<S>,
-
-    /// Queue used to spawn tasks.
-    queue: Queue<S>,
+    task_store: S,
 
     /// Make possible to load the application data.
     ///
@@ -49,16 +45,10 @@ where
     /// Create a new worker pool.
     pub fn new<A>(task_store: S, application_data_fn: A) -> Self
     where
-        A: Fn(Queue<S>) -> AppData + Send + Sync + 'static,
+        A: Fn() -> AppData + Send + Sync + 'static,
     {
-        let queue = Queue::new(task_store.clone());
-        let application_data_fn = {
-            let queue = queue.clone();
-            move || application_data_fn(queue.clone())
-        };
         Self {
-            task_store: Arc::new(task_store),
-            queue,
+            task_store,
             application_data_fn: Arc::new(application_data_fn),
             task_registry: BTreeMap::new(),
             queue_tasks: BTreeMap::new(),
@@ -85,10 +75,7 @@ where
         self
     }
 
-    pub async fn start<F>(
-        self,
-        graceful_shutdown: F,
-    ) -> Result<(JoinHandle<()>, Queue<S>), BackieError>
+    pub async fn start<F>(self, graceful_shutdown: F) -> Result<JoinHandle<()>, BackieError>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -127,28 +114,25 @@ where
             }
         }
 
-        Ok((
-            tokio::spawn(async move {
-                graceful_shutdown.await;
-                if let Err(err) = tx.send(()) {
-                    log::warn!("Failed to send shutdown signal to worker pool: {}", err);
+        Ok(tokio::spawn(async move {
+            graceful_shutdown.await;
+            if let Err(err) = tx.send(()) {
+                log::warn!("Failed to send shutdown signal to worker pool: {}", err);
+            } else {
+                // Wait for all workers to finish processing
+                let results = join_all(worker_handles)
+                    .await
+                    .into_iter()
+                    .filter(Result::is_err)
+                    .map(Result::unwrap_err)
+                    .collect::<Vec<_>>();
+                if !results.is_empty() {
+                    log::error!("Worker pool stopped with errors: {:?}", results);
                 } else {
-                    // Wait for all workers to finish processing
-                    let results = join_all(worker_handles)
-                        .await
-                        .into_iter()
-                        .filter(Result::is_err)
-                        .map(Result::unwrap_err)
-                        .collect::<Vec<_>>();
-                    if !results.is_empty() {
-                        log::error!("Worker pool stopped with errors: {:?}", results);
-                    } else {
-                        log::info!("Worker pool stopped gracefully");
-                    }
+                    log::info!("Worker pool stopped gracefully");
                 }
-            }),
-            self.queue,
-        ))
+            }
+        }))
     }
 }
 
@@ -232,6 +216,7 @@ mod tests {
     use crate::store::test_store::MemoryTaskStore;
     use crate::store::PgTaskStore;
     use crate::task::CurrentTask;
+    use crate::Queue;
     use async_trait::async_trait;
     use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
     use diesel_async::AsyncPgConnection;
@@ -341,7 +326,7 @@ mod tests {
     async fn validate_all_registered_tasks_queues_are_configured() {
         let my_app_context = ApplicationContext::new();
 
-        let result = WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
+        let result = WorkerPool::new(memory_store(), move || my_app_context.clone())
             .register_task_type::<GreetingTask>()
             .start(futures::future::ready(()))
             .await;
@@ -359,14 +344,16 @@ mod tests {
     async fn test_worker_pool_with_task() {
         let my_app_context = ApplicationContext::new();
 
-        let (join_handle, queue) =
-            WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
-                .register_task_type::<GreetingTask>()
-                .configure_queue(<GreetingTask as MyAppTask>::QUEUE.into())
-                .start(futures::future::ready(()))
-                .await
-                .unwrap();
+        let task_store = memory_store();
 
+        let join_handle = WorkerPool::new(task_store.clone(), move || my_app_context.clone())
+            .register_task_type::<GreetingTask>()
+            .configure_queue(<GreetingTask as MyAppTask>::QUEUE.into())
+            .start(futures::future::ready(()))
+            .await
+            .unwrap();
+
+        let queue = Queue::new(task_store);
         queue
             .enqueue(GreetingTask {
                 person: "Rafael".to_string(),
@@ -381,16 +368,17 @@ mod tests {
     async fn test_worker_pool_with_multiple_task_types() {
         let my_app_context = ApplicationContext::new();
 
-        let (join_handle, queue) =
-            WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
-                .register_task_type::<GreetingTask>()
-                .register_task_type::<OtherTask>()
-                .configure_queue("default".into())
-                .configure_queue("other_queue".into())
-                .start(futures::future::ready(()))
-                .await
-                .unwrap();
+        let task_store = memory_store();
+        let join_handle = WorkerPool::new(task_store.clone(), move || my_app_context.clone())
+            .register_task_type::<GreetingTask>()
+            .register_task_type::<OtherTask>()
+            .configure_queue("default".into())
+            .configure_queue("other_queue".into())
+            .start(futures::future::ready(()))
+            .await
+            .unwrap();
 
+        let queue = Queue::new(task_store.clone());
         queue
             .enqueue(GreetingTask {
                 person: "Rafael".to_string(),
@@ -442,17 +430,19 @@ mod tests {
             notify_finished: Arc::new(Mutex::new(Some(tx))),
         };
 
-        let (join_handle, queue) =
-            WorkerPool::new(memory_store().await, move |_| my_app_context.clone())
-                .register_task_type::<NotifyFinished>()
-                .configure_queue("default".into())
-                .start(async move {
-                    rx.await.unwrap();
-                    println!("Worker pool got notified to stop");
-                })
-                .await
-                .unwrap();
+        let memory_store = memory_store();
 
+        let join_handle = WorkerPool::new(memory_store.clone(), move || my_app_context.clone())
+            .register_task_type::<NotifyFinished>()
+            .configure_queue("default".into())
+            .start(async move {
+                rx.await.unwrap();
+                println!("Worker pool got notified to stop");
+            })
+            .await
+            .unwrap();
+
+        let queue = Queue::new(memory_store);
         // Notifies the worker pool to stop after the task is executed
         queue.enqueue(NotifyFinished).await.unwrap();
 
@@ -527,11 +517,11 @@ mod tests {
             unknown_task_ran: Arc::new(AtomicBool::new(false)),
         };
 
-        let task_store = memory_store().await;
+        let task_store = memory_store();
 
-        let (join_handle, queue) = WorkerPool::new(task_store, {
+        let join_handle = WorkerPool::new(task_store.clone(), {
             let my_app_context = my_app_context.clone();
-            move |_| my_app_context.clone()
+            move || my_app_context.clone()
         })
         .register_task_type::<NotifyStopDuringRun>()
         .configure_queue("default".into())
@@ -542,6 +532,7 @@ mod tests {
         .await
         .unwrap();
 
+        let queue = Queue::new(task_store);
         // Enqueue a task that is not registered
         queue.enqueue(UnknownTask).await.unwrap();
 
@@ -574,9 +565,9 @@ mod tests {
 
         let (notify_stop_worker_pool, should_stop) = tokio::sync::oneshot::channel();
 
-        let task_store = memory_store().await;
+        let task_store = memory_store();
 
-        let (worker_pool_finished, queue) = WorkerPool::new(task_store.clone(), |_| ())
+        let worker_pool_finished = WorkerPool::new(task_store.clone(), || ())
             .register_task_type::<BrokenTask>()
             .configure_queue("default".into())
             .start(async move {
@@ -585,6 +576,7 @@ mod tests {
             .await
             .unwrap();
 
+        let queue = Queue::new(task_store.clone());
         // Enqueue a task that will panic
         queue.enqueue(BrokenTask).await.unwrap();
 
@@ -670,11 +662,11 @@ mod tests {
             ping_rx: Arc::new(Mutex::new(ping_rx)),
         };
 
-        let task_store = memory_store().await;
+        let task_store = memory_store();
 
-        let (worker_pool_finished, queue) = WorkerPool::new(task_store, {
+        let worker_pool_finished = WorkerPool::new(task_store.clone(), {
             let player_context = player_context.clone();
-            move |_| player_context.clone()
+            move || player_context.clone()
         })
         .register_task_type::<KeepAliveTask>()
         .configure_queue("default".into())
@@ -685,6 +677,7 @@ mod tests {
         .await
         .unwrap();
 
+        let queue = Queue::new(task_store);
         queue.enqueue(KeepAliveTask).await.unwrap();
 
         // Make sure task is running
@@ -710,7 +703,7 @@ mod tests {
         ping_tx.send(PingPongGame::StopThisNow).await.unwrap();
     }
 
-    async fn memory_store() -> MemoryTaskStore {
+    fn memory_store() -> MemoryTaskStore {
         MemoryTaskStore::default()
     }
 
@@ -719,16 +712,15 @@ mod tests {
     async fn test_worker_pool_with_pg_store() {
         let my_app_context = ApplicationContext::new();
 
-        let (join_handle, _queue) =
-            WorkerPool::new(pg_task_store().await, move |_| my_app_context.clone())
-                .register_task_type::<GreetingTask>()
-                .configure_queue(
-                    QueueConfig::new(<GreetingTask as MyAppTask>::QUEUE)
-                        .retention_mode(RetentionMode::RemoveDone),
-                )
-                .start(futures::future::ready(()))
-                .await
-                .unwrap();
+        let join_handle = WorkerPool::new(pg_task_store().await, move || my_app_context.clone())
+            .register_task_type::<GreetingTask>()
+            .configure_queue(
+                QueueConfig::new(<GreetingTask as MyAppTask>::QUEUE)
+                    .retention_mode(RetentionMode::RemoveDone),
+            )
+            .start(futures::future::ready(()))
+            .await
+            .unwrap();
 
         join_handle.await.unwrap();
     }

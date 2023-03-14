@@ -118,8 +118,8 @@ async fn main() {
     let my_app_context = MyApplicationContext::new("Backie Example App");
 
     // Register the task types I want to use and start the worker pool
-    let (join_handle, _queue) =
-        WorkerPool::new(task_store.clone(), move |_| my_app_context.clone())
+    let join_handle =
+        WorkerPool::new(task_store.clone(), move || my_app_context.clone())
             .register_task_type::<MyTask>()
             .register_task_type::<MyFailingTask>()
             .configure_queue("default".into())
@@ -135,7 +135,7 @@ async fn main() {
     let task2 = MyTask::new(20_000);
     let task3 = MyFailingTask::new(50_000);
 
-    let queue = Queue::new(task_store); // or use the `queue` instance returned by the worker pool
+    let queue = Queue::new(task_store);
     queue.enqueue(task1).await.unwrap();
     queue.enqueue(task2).await.unwrap();
     queue.enqueue(task3).await.unwrap();

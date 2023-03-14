@@ -59,7 +59,7 @@ where
     AppData: Clone + Send + 'static,
     S: TaskStore + Clone,
 {
-    store: Arc<S>,
+    store: S,
 
     queue_name: String,
 
@@ -81,7 +81,7 @@ where
     S: TaskStore + Clone,
 {
     pub(crate) fn new(
-        store: Arc<S>,
+        store: S,
         queue_name: String,
         retention_mode: RetentionMode,
         pull_interval: Duration,
