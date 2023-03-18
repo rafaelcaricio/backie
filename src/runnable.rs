@@ -53,8 +53,8 @@ pub trait BackgroundTask: Serialize + DeserializeOwned + Sync + Send + 'static {
 
     /// Number of retries for tasks.
     ///
-    /// By default, it is set to 5.
-    const MAX_RETRIES: i32 = 5;
+    /// By default, it is set to 3.
+    const MAX_RETRIES: i32 = 3;
 
     /// The application data provided to this task at runtime.
     type AppData: Clone + Send + 'static;

@@ -31,6 +31,25 @@ Here are some of the Backie's key features:
 - Task timeout: Tasks are retried if they are not completed in time
 - Scheduling of tasks: Tasks can be scheduled to be executed at a specific time
 
+## Task execution protocol
+
+The following diagram shows the protocol used to execute tasks:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Ready
+    Ready --> Running: Task is picked up by a worker
+    Running --> Done: Task is finished
+    Running --> Failed: Task failed
+    Failed --> Ready: Task is retried
+    Failed --> [*]: Task is not retried anymore, max retries reached
+    Done --> [*]
+```
+
+When a task goes from `Running` to `Failed` it is retried. The number of retries is controlled by the
+[`BackgroundTask::MAX_RETRIES`] attribute. The default implementation uses `3` retries.
+
+
 ## Safety
 
 This crate uses `#![forbid(unsafe_code)]` to ensure everything is implemented in 100% safe Rust.
