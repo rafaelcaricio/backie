@@ -1,5 +1,6 @@
-# Backie 🚲
+<p align="center"><img src="logo.png" alt="Backie" width="400"></p>
 
+---
 Async persistent background task processing for Rust applications with Tokio. Queue asynchronous tasks
 to be processed by workers. It's designed to be easy to use and horizontally scalable. It uses Postgres as
 a storage backend and can also be extended to support other types of storage.
