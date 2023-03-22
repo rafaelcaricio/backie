@@ -25,7 +25,7 @@ where
     {
         // TODO: Add option to specify the timeout of a task
         self.task_store
-            .create_task(NewTask::new(background_task, Duration::from_secs(10))?)
+            .create_task(NewTask::with_timeout(background_task, Duration::from_secs(10))?)
             .await?;
         Ok(())
     }

@@ -1,5 +1,7 @@
 use crate::errors::AsyncQueueError;
 use crate::task::{NewTask, Task, TaskId, TaskState};
+use crate::BackgroundTask;
+use async_trait::async_trait;
 use diesel::result::Error::QueryBuilderError;
 use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::AsyncConnection;
@@ -14,6 +16,23 @@ pub struct PgTaskStore {
 impl PgTaskStore {
     pub fn new(pool: Pool<AsyncPgConnection>) -> Self {
         PgTaskStore { pool }
+    }
+}
+
+/// A trait that is used to enqueue tasks for the PostgreSQL backend.
+#[async_trait::async_trait]
+pub trait PgQueueTask {
+    async fn enqueue(self, connection: &mut AsyncPgConnection) -> Result<(), AsyncQueueError>;
+}
+
+impl<T> PgQueueTask for T
+where
+    T: BackgroundTask,
+{
+    async fn enqueue(self, connection: &mut AsyncPgConnection) -> Result<(), AsyncQueueError> {
+        let new_task = NewTask::new::<T>(self)?;
+        Task::insert(connection, new_task).await?;
+        Ok(())
     }
 }
 

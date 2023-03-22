@@ -7,7 +7,10 @@ use chrono::Duration;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::ExpressionMethods;
-use diesel_async::{pg::AsyncPgConnection, RunQueryDsl};
+use diesel::query_builder::{Query, QueryFragment, QueryId};
+use diesel::sql_types::{HasSqlType, SingleValue};
+use diesel_async::return_futures::GetResult;
+use diesel_async::{pg::AsyncPgConnection, AsyncConnection, RunQueryDsl};
 
 impl Task {
     pub(crate) async fn remove(
