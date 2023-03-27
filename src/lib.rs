@@ -24,7 +24,7 @@ impl Default for RetentionMode {
 }
 
 pub use runnable::BackgroundTask;
-pub use store::{EnqueuePgStore, PgTaskStore, TaskStore};
+pub use store::{PgTask, PgTaskStore, TaskStore};
 pub use task::{CurrentTask, NewTask, Task, TaskId, TaskState};
 pub use worker::Worker;
 pub use worker_pool::{QueueConfig, WorkerPool};

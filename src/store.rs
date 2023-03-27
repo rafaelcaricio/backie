@@ -20,7 +20,7 @@ impl PgTaskStore {
 
 /// A trait that is used to enqueue tasks for the PostgreSQL backend.
 #[async_trait::async_trait]
-pub trait EnqueuePgStore {
+pub trait PgTask {
     /// Enqueue a task for execution.
     ///
     /// This method accepts a connection thus enabling the user to use a transaction while
@@ -30,7 +30,7 @@ pub trait EnqueuePgStore {
 }
 
 #[async_trait::async_trait]
-impl<T> EnqueuePgStore for T
+impl<T> PgTask for T
 where
     T: BackgroundTask,
 {
@@ -125,12 +125,12 @@ pub mod test_store {
     }
 
     #[async_trait::async_trait]
-    pub trait EnqueueMemoryStore {
+    pub trait MemoryTask {
         async fn enqueue(self, store: &MemoryTaskStore) -> Result<(), AsyncQueueError>;
     }
 
     #[async_trait::async_trait]
-    impl<T> EnqueueMemoryStore for T
+    impl<T> MemoryTask for T
     where
         T: BackgroundTask,
     {

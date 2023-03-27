@@ -213,7 +213,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::test_store::{EnqueueMemoryStore, MemoryTaskStore};
+    use crate::store::test_store::{MemoryTask, MemoryTaskStore};
     use crate::store::PgTaskStore;
     use crate::task::CurrentTask;
     use async_trait::async_trait;

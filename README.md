@@ -135,12 +135,10 @@ A full example of starting a worker pool can be found in the [examples directory
 
 ### Queueing tasks
 
-After stating the workers, we get an instance of [`Queue`] which we can use to enqueue tasks. It is also possible
-to directly create a [`Queue`] instance from with a [`TaskStore`] instance.
-
-This will enqueue the task and whenever a worker is available it will start processing. Workers don't need to be
-started before enqueuing tasks. Workers don't need to be in the same process as the queue as long as the workers have
-access to the same underlying storage system. This enables horizontal scaling of the workers.
+We can schedule tasks at any point using the [`PgTask`] trait. This will enqueue the task and whenever a worker is
+available it will start processing. Workers don't need to be started before enqueuing tasks. Workers don't need to be
+in the same process as the queue as long as the workers have access to the same underlying storage system. This enables
+horizontal scaling of the workers.
 
 ## License
 
