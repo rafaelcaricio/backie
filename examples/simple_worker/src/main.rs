@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use backie::{BackgroundTask, CurrentTask, QueueConfig, RetentionMode};
-use backie::{PgTaskStore, Queue, WorkerPool};
+use backie::{BackgroundTask, CurrentTask, EnqueuePgStore, QueueConfig, RetentionMode};
+use backie::{PgTaskStore, WorkerPool};
 use diesel_async::pg::AsyncPgConnection;
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
 use serde::{Deserialize, Serialize};
@@ -144,10 +144,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Some global application context I want to pass to my background tasks
     let my_app_context = MyApplicationContext::new("Backie Example App", notify_finished);
-
-    // queue.enqueue(task1).await.unwrap();
-    // queue.enqueue(task2).await.unwrap();
-    // queue.enqueue(task3).await.unwrap();
 
     // Store all task to join them later
     let mut tasks = JoinSet::new();

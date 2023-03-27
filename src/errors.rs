@@ -26,4 +26,7 @@ pub enum AsyncQueueError {
 
     #[error("Task with name {0} is not registered")]
     TaskNotRegistered(String),
+
+    #[error("Task with name {0} is not serializable to JSON")]
+    JsonError(#[from] serde_json::Error),
 }
