@@ -1,6 +1,6 @@
 [package]
 name = "backie"
-version = "0.6.0"
+version = "0.7.0"
 authors = [
     "Rafael Caricio <rafael@caricio.com>",
 ]
