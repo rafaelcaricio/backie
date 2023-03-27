@@ -711,21 +711,24 @@ mod tests {
     async fn test_worker_pool_with_pg_store() {
         let my_app_context = ApplicationContext::new();
 
-        let join_handle = WorkerPool::new(pg_task_store().await, move || my_app_context.clone())
-            .register_task_type::<GreetingTask>()
-            .configure_queue(
-                QueueConfig::new(<GreetingTask as MyAppTask>::QUEUE)
-                    .retention_mode(RetentionMode::RemoveDone),
-            )
-            .start(futures::future::ready(()))
-            .await
-            .unwrap();
+        let join_handle = WorkerPool::new(pg_task_store().await.unwrap(), move || {
+            my_app_context.clone()
+        })
+        .register_task_type::<GreetingTask>()
+        .configure_queue(
+            QueueConfig::new(<GreetingTask as MyAppTask>::QUEUE)
+                .retention_mode(RetentionMode::RemoveDone),
+        )
+        .start(futures::future::ready(()))
+        .await
+        .unwrap();
 
         join_handle.await.unwrap();
     }
 
-    async fn pg_task_store() -> PgTaskStore {
-        let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(env!("DATABASE_URL"));
+    async fn pg_task_store() -> Result<PgTaskStore, String> {
+        let url = option_env!("DATABASE_URL").ok_or_else(|| "DATABASE_URL not set".to_string())?;
+        let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(url);
         let pool = Pool::builder()
             .max_size(1)
             .min_idle(Some(1))
@@ -733,6 +736,6 @@ mod tests {
             .await
             .unwrap();
 
-        PgTaskStore::new(pool)
+        Ok(PgTaskStore::new(pool))
     }
 }
