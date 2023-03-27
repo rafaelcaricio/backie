@@ -25,10 +25,10 @@ Here are some of the Backie's key features:
 - **Graceful shutdown**: provide a future to gracefully shutdown the workers, on-the-fly tasks are not interrupted
 - **Recovery of unfinished tasks**: Tasks that were not finished are retried on the next worker start
 - **Unique tasks**: Tasks are not duplicated in the queue if they provide a unique hash
+- **Execution timeout**: Tasks are retried if they are not completed in time
 
 ## Other planned features
 
-- Task timeout: Tasks are retried if they are not completed in time
 - Scheduling of tasks: Tasks can be scheduled to be executed at a specific time
 
 ## Task execution protocol
@@ -42,7 +42,7 @@ stateDiagram-v2
     Running --> Done: Task is finished
     Running --> Failed: Task failed
     Failed --> Ready: Task is retried
-    Failed --> [*]: Task is not retried anymore, max retries reached
+    Failed --> [*]: Max retries reached
     Done --> [*]
 ```
 
