@@ -1,5 +1,6 @@
 use crate::errors::AsyncQueueError;
 use crate::task::{NewTask, Task, TaskId, TaskState};
+use crate::BackgroundTask;
 use diesel::result::Error::QueryBuilderError;
 use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::AsyncConnection;
@@ -14,6 +15,29 @@ pub struct PgTaskStore {
 impl PgTaskStore {
     pub fn new(pool: Pool<AsyncPgConnection>) -> Self {
         PgTaskStore { pool }
+    }
+}
+
+/// A trait that is used to enqueue tasks for the PostgreSQL backend.
+#[async_trait::async_trait]
+pub trait EnqueuePgStore {
+    /// Enqueue a task for execution.
+    ///
+    /// This method accepts a connection thus enabling the user to use a transaction while
+    /// scheduling tasks. This is useful if you want to schedule a task only if some other
+    /// condition is met.
+    async fn enqueue(self, connection: &mut AsyncPgConnection) -> Result<(), AsyncQueueError>;
+}
+
+#[async_trait::async_trait]
+impl<T> EnqueuePgStore for T
+where
+    T: BackgroundTask,
+{
+    async fn enqueue(self, connection: &mut AsyncPgConnection) -> Result<(), AsyncQueueError> {
+        let new_task = NewTask::new::<T>(self)?;
+        Task::insert(connection, new_task).await?;
+        Ok(())
     }
 }
 
@@ -41,15 +65,6 @@ impl TaskStore for PgTaskStore {
                 .scope_boxed()
             })
             .await
-    }
-
-    async fn create_task(&self, new_task: NewTask) -> Result<Task, AsyncQueueError> {
-        let mut connection = self
-            .pool
-            .get()
-            .await
-            .map_err(|e| QueryBuilderError(e.into()))?;
-        Task::insert(&mut connection, new_task).await
     }
 
     async fn set_task_state(&self, id: TaskId, state: TaskState) -> Result<(), AsyncQueueError> {
@@ -110,6 +125,25 @@ pub mod test_store {
     }
 
     #[async_trait::async_trait]
+    pub trait EnqueueMemoryStore {
+        async fn enqueue(self, store: &MemoryTaskStore) -> Result<(), AsyncQueueError>;
+    }
+
+    #[async_trait::async_trait]
+    impl<T> EnqueueMemoryStore for T
+    where
+        T: BackgroundTask,
+    {
+        async fn enqueue(self, store: &MemoryTaskStore) -> Result<(), AsyncQueueError> {
+            let mut tasks = store.tasks.lock().await;
+            let new_task = NewTask::new::<T>(self)?;
+            let task = Task::from(new_task);
+            tasks.insert(task.id, task);
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
     impl TaskStore for MemoryTaskStore {
         async fn pull_next_task(
             &self,
@@ -130,13 +164,6 @@ pub mod test_store {
                 }
             }
             Ok(next_task)
-        }
-
-        async fn create_task(&self, new_task: NewTask) -> Result<Task, AsyncQueueError> {
-            let mut tasks = self.tasks.lock().await;
-            let task = Task::from(new_task);
-            tasks.insert(task.id, task.clone());
-            Ok(task)
         }
 
         async fn set_task_state(
@@ -203,7 +230,6 @@ pub trait TaskStore: Send + Sync + 'static {
         queue_name: &str,
         task_names: &[String],
     ) -> Result<Option<Task>, AsyncQueueError>;
-    async fn create_task(&self, new_task: NewTask) -> Result<Task, AsyncQueueError>;
     async fn set_task_state(&self, id: TaskId, state: TaskState) -> Result<(), AsyncQueueError>;
     async fn remove_task(&self, id: TaskId) -> Result<u64, AsyncQueueError>;
     async fn schedule_task_retry(

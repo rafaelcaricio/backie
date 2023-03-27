@@ -213,10 +213,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::test_store::MemoryTaskStore;
+    use crate::store::test_store::{EnqueueMemoryStore, MemoryTaskStore};
     use crate::store::PgTaskStore;
     use crate::task::CurrentTask;
-    use crate::Queue;
     use async_trait::async_trait;
     use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
     use diesel_async::AsyncPgConnection;
@@ -353,13 +352,10 @@ mod tests {
             .await
             .unwrap();
 
-        let queue = Queue::new(task_store);
-        queue
-            .enqueue(GreetingTask {
-                person: "Rafael".to_string(),
-            })
-            .await
-            .unwrap();
+        let task = GreetingTask {
+            person: "Rafael".to_string(),
+        };
+        task.enqueue(&task_store).await.unwrap();
 
         join_handle.await.unwrap();
     }
@@ -378,15 +374,12 @@ mod tests {
             .await
             .unwrap();
 
-        let queue = Queue::new(task_store.clone());
-        queue
-            .enqueue(GreetingTask {
-                person: "Rafael".to_string(),
-            })
-            .await
-            .unwrap();
+        let task = GreetingTask {
+            person: "Rafael".to_string(),
+        };
+        task.enqueue(&task_store).await.unwrap();
 
-        queue.enqueue(OtherTask).await.unwrap();
+        OtherTask.enqueue(&task_store).await.unwrap();
 
         join_handle.await.unwrap();
     }
@@ -442,12 +435,11 @@ mod tests {
             .await
             .unwrap();
 
-        let queue = Queue::new(memory_store);
         // Notifies the worker pool to stop after the task is executed
-        queue.enqueue(NotifyFinished).await.unwrap();
+        NotifyFinished.enqueue(&memory_store).await.unwrap();
 
         // This makes sure the task can run multiple times and use the shared context
-        queue.enqueue(NotifyFinished).await.unwrap();
+        NotifyFinished.enqueue(&memory_store).await.unwrap();
 
         join_handle.await.unwrap();
     }
@@ -532,12 +524,11 @@ mod tests {
         .await
         .unwrap();
 
-        let queue = Queue::new(task_store);
         // Enqueue a task that is not registered
-        queue.enqueue(UnknownTask).await.unwrap();
+        UnknownTask.enqueue(&task_store).await.unwrap();
 
         // Notifies the worker pool to stop for this test
-        queue.enqueue(NotifyStopDuringRun).await.unwrap();
+        NotifyStopDuringRun.enqueue(&task_store).await.unwrap();
 
         join_handle.await.unwrap();
 
@@ -576,9 +567,8 @@ mod tests {
             .await
             .unwrap();
 
-        let queue = Queue::new(task_store.clone());
         // Enqueue a task that will panic
-        queue.enqueue(BrokenTask).await.unwrap();
+        BrokenTask.enqueue(&task_store).await.unwrap();
 
         notify_stop_worker_pool.send(()).unwrap();
         worker_pool_finished.await.unwrap();
@@ -677,8 +667,7 @@ mod tests {
         .await
         .unwrap();
 
-        let queue = Queue::new(task_store);
-        queue.enqueue(KeepAliveTask).await.unwrap();
+        KeepAliveTask.enqueue(&task_store).await.unwrap();
 
         // Make sure task is running
         println!("Ping!");

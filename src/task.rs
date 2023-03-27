@@ -117,7 +117,10 @@ pub struct NewTask {
 }
 
 impl NewTask {
-    pub(crate) fn new<T>(background_task: T, timeout: Duration) -> Result<Self, serde_json::Error>
+    pub(crate) fn with_timeout<T>(
+        background_task: T,
+        timeout: Duration,
+    ) -> Result<Self, serde_json::Error>
     where
         T: BackgroundTask,
     {
@@ -133,6 +136,13 @@ impl NewTask {
             timeout_msecs: timeout.as_millis() as i64,
             max_retries,
         })
+    }
+
+    pub(crate) fn new<T>(background_task: T) -> Result<Self, serde_json::Error>
+    where
+        T: BackgroundTask,
+    {
+        Self::with_timeout(background_task, Duration::from_secs(120))
     }
 }
 
