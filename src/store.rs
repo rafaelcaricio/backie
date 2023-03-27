@@ -138,7 +138,7 @@ pub mod test_store {
             let mut tasks = store.tasks.lock().await;
             let new_task = NewTask::new::<T>(self)?;
             let task = Task::from(new_task);
-            tasks.insert(task.id, task.clone());
+            tasks.insert(task.id, task);
             Ok(())
         }
     }
