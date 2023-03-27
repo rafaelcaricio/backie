@@ -131,7 +131,7 @@ pub mod test_store {
 
     #[async_trait::async_trait]
     impl<T> EnqueueMemoryStore for T
-        where
+    where
         T: BackgroundTask,
     {
         async fn enqueue(self, store: &MemoryTaskStore) -> Result<(), AsyncQueueError> {

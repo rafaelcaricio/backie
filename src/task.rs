@@ -117,9 +117,12 @@ pub struct NewTask {
 }
 
 impl NewTask {
-    pub(crate) fn with_timeout<T>(background_task: T, timeout: Duration) -> Result<Self, serde_json::Error>
-        where
-            T: BackgroundTask,
+    pub(crate) fn with_timeout<T>(
+        background_task: T,
+        timeout: Duration,
+    ) -> Result<Self, serde_json::Error>
+    where
+        T: BackgroundTask,
     {
         let max_retries = background_task.max_retries();
         let uniq_hash = background_task.uniq();
