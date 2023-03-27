@@ -166,18 +166,18 @@ where
             Ok(_) => self.finalize_task(task, result).await?,
             Err(error) => {
                 if task.retries < task.max_retries {
-                    let backoff_seconds = 5; // TODO: runnable_task.backoff(task.retries as u32);
+                    let backoff = task.backoff_mode().next_attampt(task.retries);
 
                     log::debug!(
                         "Task {} failed to run and will be retried in {} seconds",
                         task.id,
-                        backoff_seconds
+                        backoff.as_secs()
                     );
 
                     let error_message = format!("{}", error);
 
                     self.store
-                        .schedule_task_retry(task.id, backoff_seconds, &error_message)
+                        .schedule_task_retry(task.id, backoff, &error_message)
                         .await?;
                 } else {
                     log::debug!("Task {} failed and reached the maximum retries", task.id);
@@ -287,6 +287,7 @@ mod async_worker_tests {
     #[async_trait]
     impl BackgroundTask for AsyncFailedTask {
         const TASK_NAME: &'static str = "AsyncFailedTask";
+        const MAX_RETRIES: i32 = 0;
         type AppData = ();
         type Error = TaskError;
 
@@ -294,10 +295,6 @@ mod async_worker_tests {
             let message = format!("number {} is wrong :(", self.number);
 
             Err(TaskError::Custom(message))
-        }
-
-        fn max_retries(&self) -> i32 {
-            0
         }
     }
 

@@ -715,9 +715,7 @@ mod tests {
     }
 
     async fn pg_task_store() -> PgTaskStore {
-        let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(
-            option_env!("DATABASE_URL").expect("DATABASE_URL must be set"),
-        );
+        let manager = AsyncDieselConnectionManager::<AsyncPgConnection>::new(env!("DATABASE_URL"));
         let pool = Pool::builder()
             .max_size(1)
             .min_idle(Some(1))

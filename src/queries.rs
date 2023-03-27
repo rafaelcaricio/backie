@@ -3,11 +3,11 @@ use crate::schema::backie_tasks;
 use crate::task::Task;
 use crate::task::{NewTask, TaskId};
 use chrono::DateTime;
-use chrono::Duration;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::ExpressionMethods;
 use diesel_async::{pg::AsyncPgConnection, RunQueryDsl};
+use std::time::Duration;
 
 impl Task {
     pub(crate) async fn remove(
@@ -39,7 +39,7 @@ impl Task {
     pub(crate) async fn schedule_retry(
         connection: &mut AsyncPgConnection,
         id: TaskId,
-        backoff_seconds: u32,
+        backoff: Duration,
         error_message: &str,
     ) -> Result<Task, AsyncQueueError> {
         use crate::schema::backie_tasks::dsl;
@@ -52,8 +52,8 @@ impl Task {
             .set((
                 backie_tasks::error_info.eq(Some(error)),
                 backie_tasks::retries.eq(dsl::retries + 1),
-                backie_tasks::scheduled_at
-                    .eq(Utc::now() + Duration::seconds(backoff_seconds as i64)),
+                backie_tasks::scheduled_at.eq(Utc::now()
+                    + chrono::Duration::from_std(backoff).unwrap_or(chrono::Duration::max_value())),
                 backie_tasks::running_at.eq::<Option<DateTime<Utc>>>(None),
             ))
             .get_result::<Task>(connection)

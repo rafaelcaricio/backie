@@ -15,5 +15,6 @@ diesel::table! {
         error_info -> Nullable<Jsonb>,
         retries -> Int4,
         max_retries -> Int4,
+        backoff_mode -> Jsonb,
     }
 }

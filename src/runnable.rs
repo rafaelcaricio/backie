@@ -1,4 +1,5 @@
 use crate::task::{CurrentTask, TaskHash};
+use crate::BackoffMode;
 use async_trait::async_trait;
 use serde::{de::DeserializeOwned, ser::Serialize};
 use std::fmt::Debug;
@@ -56,6 +57,9 @@ pub trait BackgroundTask: Serialize + DeserializeOwned + Sync + Send + 'static {
     /// By default, it is set to 3.
     const MAX_RETRIES: i32 = 3;
 
+    /// Backoff mode for tasks.
+    const BACKOFF_MODE: BackoffMode = BackoffMode::ExponentialBackoff;
+
     /// The application data provided to this task at runtime.
     type AppData: Clone + Send + 'static;
 
@@ -69,17 +73,5 @@ pub trait BackgroundTask: Serialize + DeserializeOwned + Sync + Send + 'static {
     /// By default it is set to false.
     fn uniq(&self) -> Option<TaskHash> {
         None
-    }
-
-    /// Define the maximum number of retries the task will be retried.
-    /// By default the number of retries is 20.
-    fn max_retries(&self) -> i32 {
-        Self::MAX_RETRIES
-    }
-
-    /// Define the backoff mode
-    /// By default, it is exponential,  2^(attempt)
-    fn backoff(&self, attempt: u32) -> u32 {
-        u32::pow(2, attempt)
     }
 }

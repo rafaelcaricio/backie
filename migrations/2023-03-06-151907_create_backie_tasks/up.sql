@@ -13,7 +13,8 @@ CREATE TABLE backie_tasks (
     done_at TIMESTAMP WITH TIME ZONE DEFAULT NULL,
     error_info jsonb DEFAULT NULL,
     retries INTEGER DEFAULT 0 NOT NULL,
-    max_retries INTEGER DEFAULT 0 NOT NULL
+    max_retries INTEGER DEFAULT 0 NOT NULL,
+    backoff_mode jsonb NOT NULL
 );
 
 --- create uniqueness index

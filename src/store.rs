@@ -5,6 +5,7 @@ use diesel::result::Error::QueryBuilderError;
 use diesel_async::scoped_futures::ScopedFutureExt;
 use diesel_async::AsyncConnection;
 use diesel_async::{pg::AsyncPgConnection, pooled_connection::bb8::Pool};
+use std::time::Duration;
 
 /// An async queue that is used to manipulate tasks, it uses PostgreSQL as storage.
 #[derive(Debug, Clone)]
@@ -98,7 +99,7 @@ impl TaskStore for PgTaskStore {
     async fn schedule_task_retry(
         &self,
         id: TaskId,
-        backoff_seconds: u32,
+        backoff: Duration,
         error: &str,
     ) -> Result<Task, AsyncQueueError> {
         let mut connection = self
@@ -106,7 +107,7 @@ impl TaskStore for PgTaskStore {
             .get()
             .await
             .map_err(|e| QueryBuilderError(e.into()))?;
-        let task = Task::schedule_retry(&mut connection, id, backoff_seconds, error).await?;
+        let task = Task::schedule_retry(&mut connection, id, backoff, error).await?;
         Ok(task)
     }
 }
@@ -203,7 +204,7 @@ pub mod test_store {
         async fn schedule_task_retry(
             &self,
             id: TaskId,
-            backoff_seconds: u32,
+            backoff: Duration,
             error: &str,
         ) -> Result<Task, AsyncQueueError> {
             let mut tasks = self.tasks.lock().await;
@@ -215,8 +216,8 @@ pub mod test_store {
             task.error_info = Some(error_payload);
             task.running_at = None;
             task.retries += 1;
-            task.scheduled_at =
-                chrono::Utc::now() + chrono::Duration::seconds(backoff_seconds as i64);
+            task.scheduled_at = chrono::Utc::now()
+                + chrono::Duration::from_std(backoff).unwrap_or(chrono::Duration::max_value());
 
             Ok(task.clone())
         }
@@ -235,7 +236,7 @@ pub trait TaskStore: Send + Sync + 'static {
     async fn schedule_task_retry(
         &self,
         id: TaskId,
-        backoff_seconds: u32,
+        backoff: Duration,
         error: &str,
     ) -> Result<Task, AsyncQueueError>;
 }

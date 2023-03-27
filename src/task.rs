@@ -1,5 +1,5 @@
 use crate::schema::backie_tasks;
-use crate::BackgroundTask;
+use crate::{BackgroundTask, BackoffMode};
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -86,6 +86,9 @@ pub struct Task {
 
     /// Maximum number of retries allow for this task before it is maked as failure.
     pub max_retries: i32,
+
+    /// Backoff mode for this task.
+    pub backoff_mode: serde_json::Value, // We use JSON to allow the backoff mode to be changed in the future and maybe hold configuration values
 }
 
 impl Task {
@@ -103,6 +106,10 @@ impl Task {
             TaskState::Ready
         }
     }
+
+    pub fn backoff_mode(&self) -> BackoffMode {
+        serde_json::from_value(self.backoff_mode.clone()).expect("Invalid backoff mode")
+    }
 }
 
 #[derive(Insertable, Debug, Eq, PartialEq, Clone)]
@@ -114,6 +121,7 @@ pub struct NewTask {
     payload: serde_json::Value,
     timeout_msecs: i64,
     max_retries: i32,
+    backoff_mode: serde_json::Value,
 }
 
 impl NewTask {
@@ -124,7 +132,6 @@ impl NewTask {
     where
         T: BackgroundTask,
     {
-        let max_retries = background_task.max_retries();
         let uniq_hash = background_task.uniq();
         let payload = serde_json::to_value(background_task)?;
 
@@ -134,7 +141,8 @@ impl NewTask {
             uniq_hash,
             payload,
             timeout_msecs: timeout.as_millis() as i64,
-            max_retries,
+            max_retries: T::MAX_RETRIES,
+            backoff_mode: serde_json::to_value(T::BACKOFF_MODE)?,
         })
     }
 
@@ -163,6 +171,7 @@ impl From<NewTask> for Task {
             error_info: None,
             retries: 0,
             max_retries: new_task.max_retries,
+            backoff_mode: new_task.backoff_mode,
         }
     }
 }
