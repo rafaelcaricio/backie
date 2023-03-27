@@ -65,21 +65,44 @@ impl Task {
     pub(crate) async fn fetch_next_pending(
         connection: &mut AsyncPgConnection,
         queue_name: &str,
+        execution_timeout: Option<Duration>,
         task_names: &[String],
     ) -> Option<Task> {
-        backie_tasks::table
-            .filter(backie_tasks::task_name.eq_any(task_names))
-            .filter(backie_tasks::scheduled_at.lt(Utc::now())) // skip tasks scheduled for the future
-            .order(backie_tasks::created_at.asc()) // get the oldest task first
-            .filter(backie_tasks::running_at.is_null()) // that is not marked as running already
-            .filter(backie_tasks::done_at.is_null()) // and not marked as done
-            .filter(backie_tasks::queue_name.eq(queue_name))
-            .limit(1)
-            .for_update()
-            .skip_locked()
-            .get_result::<Task>(connection)
-            .await
-            .ok()
+        if let Some(execution_timeout) = execution_timeout {
+            backie_tasks::table
+                .filter(backie_tasks::task_name.eq_any(task_names))
+                .filter(backie_tasks::scheduled_at.lt(Utc::now())) // skip tasks scheduled for the future
+                .order(backie_tasks::created_at.asc()) // get the oldest task first
+                .filter(backie_tasks::done_at.is_null()) // and not marked as done
+                .filter(backie_tasks::queue_name.eq(queue_name))
+                .filter(
+                    backie_tasks::running_at
+                        .is_null()
+                        .or(backie_tasks::running_at.lt(Utc::now()
+                            - chrono::Duration::from_std(execution_timeout)
+                                .unwrap_or(chrono::Duration::max_value()))),
+                ) // that is not marked as running already or expired
+                .for_update()
+                .skip_locked()
+                .limit(1)
+                .get_result::<Task>(connection)
+                .await
+                .ok()
+        } else {
+            backie_tasks::table
+                .filter(backie_tasks::task_name.eq_any(task_names))
+                .filter(backie_tasks::scheduled_at.lt(Utc::now())) // skip tasks scheduled for the future
+                .order(backie_tasks::created_at.asc()) // get the oldest task first
+                .filter(backie_tasks::done_at.is_null()) // and not marked as done
+                .filter(backie_tasks::queue_name.eq(queue_name))
+                .filter(backie_tasks::running_at.is_null()) // that is not marked as running already
+                .for_update()
+                .skip_locked()
+                .limit(1)
+                .get_result::<Task>(connection)
+                .await
+                .ok()
+        }
     }
 
     pub(crate) async fn set_running(

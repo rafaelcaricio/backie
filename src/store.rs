@@ -47,6 +47,7 @@ impl TaskStore for PgTaskStore {
     async fn pull_next_task(
         &self,
         queue_name: &str,
+        execution_timeout: Option<Duration>,
         task_names: &[String],
     ) -> Result<Option<Task>, AsyncQueueError> {
         let mut connection = self
@@ -57,7 +58,7 @@ impl TaskStore for PgTaskStore {
         connection
             .transaction::<Option<Task>, AsyncQueueError, _>(|conn| {
                 async move {
-                    let Some(pending_task) = Task::fetch_next_pending(conn, queue_name, task_names).await else {
+                    let Some(pending_task) = Task::fetch_next_pending(conn, queue_name, execution_timeout, task_names).await else {
                         return Ok(None);
                     };
 
@@ -149,6 +150,7 @@ pub mod test_store {
         async fn pull_next_task(
             &self,
             queue_name: &str,
+            execution_timeout: Option<Duration>,
             task_names: &[String],
         ) -> Result<Option<Task>, AsyncQueueError> {
             let mut tasks = self.tasks.lock().await;
@@ -162,6 +164,16 @@ pub mod test_store {
                     task.running_at = Some(chrono::Utc::now());
                     next_task = Some(task.clone());
                     break;
+                } else if let Some(execution_timeout) = execution_timeout {
+                    if let Some(running_at) = task.running_at {
+                        let execution_timeout =
+                            chrono::Duration::from_std(execution_timeout).unwrap();
+                        if running_at + execution_timeout < chrono::Utc::now() {
+                            task.running_at = Some(chrono::Utc::now());
+                            next_task = Some(task.clone());
+                            break;
+                        }
+                    }
                 }
             }
             Ok(next_task)
@@ -229,6 +241,7 @@ pub trait TaskStore: Send + Sync + 'static {
     async fn pull_next_task(
         &self,
         queue_name: &str,
+        execution_timeout: Option<Duration>,
         task_names: &[String],
     ) -> Result<Option<Task>, AsyncQueueError>;
     async fn set_task_state(&self, id: TaskId, state: TaskState) -> Result<(), AsyncQueueError>;

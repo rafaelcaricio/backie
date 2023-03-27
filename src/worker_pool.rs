@@ -95,9 +95,7 @@ where
             for idx in 0..queue_config.num_workers {
                 let mut worker: Worker<AppData, S> = Worker::new(
                     self.task_store.clone(),
-                    queue_name.clone(),
-                    queue_config.retention_mode,
-                    queue_config.pull_interval,
+                    queue_config.to_owned(),
                     self.task_registry.clone(),
                     self.application_data_fn.clone(),
                     Some(rx.clone()),
@@ -151,6 +149,7 @@ where
 /// let config = QueueConfig::new("default")
 ///     .num_workers(5)
 ///     .retention_mode(RetentionMode::KeepAll)
+///     .execution_timeout(Duration::from_secs(60))
 ///     .pull_interval(Duration::from_secs(1));
 /// ```
 /// Example of queue configuration with default options:
@@ -162,10 +161,11 @@ where
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct QueueConfig {
-    name: String,
-    num_workers: u32,
-    retention_mode: RetentionMode,
-    pull_interval: Duration,
+    pub(crate) name: String,
+    pub(crate) num_workers: u32,
+    pub(crate) retention_mode: RetentionMode,
+    pub(crate) execution_timeout: Option<Duration>,
+    pub(crate) pull_interval: Duration,
 }
 
 impl QueueConfig {
@@ -175,6 +175,7 @@ impl QueueConfig {
             name: name.to_string(),
             num_workers: 1,
             retention_mode: RetentionMode::default(),
+            execution_timeout: None,
             pull_interval: Duration::from_secs(1),
         }
     }
@@ -188,6 +189,15 @@ impl QueueConfig {
     /// Set the retention mode for this queue.
     pub fn retention_mode(mut self, retention_mode: RetentionMode) -> Self {
         self.retention_mode = retention_mode;
+        self
+    }
+
+    /// Set the execution timeout for this queue.
+    ///
+    /// This is the maximum time a task can run before it is considered failed and ready to retry.
+    /// If this is not set, the task may run indefinitely.
+    pub fn execution_timeout(mut self, execution_timeout: Duration) -> Self {
+        self.execution_timeout = Some(execution_timeout);
         self
     }
 

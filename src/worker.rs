@@ -3,14 +3,13 @@ use crate::errors::{AsyncQueueError, BackieError};
 use crate::runnable::BackgroundTask;
 use crate::store::TaskStore;
 use crate::task::{CurrentTask, Task, TaskState};
-use crate::RetentionMode;
+use crate::{QueueConfig, RetentionMode};
 use futures::future::FutureExt;
 use futures::select;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub type ExecuteTaskFn<AppData> = Arc<
     dyn Fn(
@@ -61,11 +60,7 @@ where
 {
     store: S,
 
-    queue_name: String,
-
-    retention_mode: RetentionMode,
-
-    pull_interval: Duration,
+    config: QueueConfig,
 
     task_registry: BTreeMap<String, ExecuteTaskFn<AppData>>,
 
@@ -82,18 +77,14 @@ where
 {
     pub(crate) fn new(
         store: S,
-        queue_name: String,
-        retention_mode: RetentionMode,
-        pull_interval: Duration,
+        config: QueueConfig,
         task_registry: BTreeMap<String, ExecuteTaskFn<AppData>>,
         app_data_fn: StateFn<AppData>,
         shutdown: Option<tokio::sync::watch::Receiver<()>>,
     ) -> Self {
         Self {
             store,
-            queue_name,
-            retention_mode,
-            pull_interval,
+            config,
             task_registry,
             app_data_fn,
             shutdown,
@@ -112,7 +103,11 @@ where
 
             match self
                 .store
-                .pull_next_task(&self.queue_name, &registered_task_names)
+                .pull_next_task(
+                    &self.config.name,
+                    self.config.execution_timeout,
+                    &registered_task_names,
+                )
                 .await?
             {
                 Some(task) => {
@@ -130,11 +125,11 @@ where
                                     log::info!("Shutting down worker");
                                     return Ok(());
                                 }
-                                _ = tokio::time::sleep(self.pull_interval).fuse() => {}
+                                _ = tokio::time::sleep(self.config.pull_interval).fuse() => {}
                             }
                         }
                         None => {
-                            tokio::time::sleep(self.pull_interval).await;
+                            tokio::time::sleep(self.config.pull_interval).await;
                         }
                     };
                 }
@@ -193,7 +188,7 @@ where
         task: Task,
         result: Result<(), TaskExecError>,
     ) -> Result<(), BackieError> {
-        match self.retention_mode {
+        match self.config.retention_mode {
             RetentionMode::KeepAll => match result {
                 Ok(_) => {
                     self.store.set_task_state(task.id, TaskState::Done).await?;
