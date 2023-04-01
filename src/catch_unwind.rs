@@ -34,13 +34,13 @@ fn catch_unwind<F: FnOnce() -> R, R>(f: F) -> Result<R, TaskExecError> {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(res) => Ok(res),
         Err(cause) => match cause.downcast_ref::<&'static str>() {
+            Some(message) => Err(TaskExecError::Panicked(message.to_string())),
             None => match cause.downcast_ref::<String>() {
+                Some(message) => Err(TaskExecError::Panicked(message.to_string())),
                 None => Err(TaskExecError::Panicked(
                     "Sorry, unknown panic message".to_string(),
                 )),
-                Some(message) => Err(TaskExecError::Panicked(message.to_string())),
             },
-            Some(message) => Err(TaskExecError::Panicked(message.to_string())),
         },
     }
 }
