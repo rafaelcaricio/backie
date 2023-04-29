@@ -161,7 +161,7 @@ where
             Ok(_) => self.finalize_task(task, result).await?,
             Err(error) => {
                 if task.retries < task.max_retries {
-                    let backoff = task.backoff_mode().next_attampt(task.retries);
+                    let backoff = task.backoff_mode().next_attempt(task.retries);
 
                     log::debug!(
                         "Task {} failed to run and will be retried in {} seconds",
