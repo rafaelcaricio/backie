@@ -21,9 +21,9 @@ thiserror = "1"
 uuid = { version = "1.1", features = ["v4", "serde"] }
 async-trait = "0.1"
 futures = "0.3"
-diesel = { version = "2.0", features = ["postgres", "serde_json", "chrono", "uuid"] }
+diesel = { version = "2.1", features = ["postgres", "serde_json", "chrono", "uuid"] }
 diesel-derive-newtype = "2.0.0-rc.0"
-diesel-async = { version = "0.2", features = ["postgres", "bb8"] }
+diesel-async = { version = "0.3", features = ["postgres", "bb8"] }
 tokio = { version = "1.25", features = ["rt", "time", "macros"] }
 
 [dev-dependencies]
