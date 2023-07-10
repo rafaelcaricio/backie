@@ -1,10 +1,9 @@
 use async_trait::async_trait;
-use backie::{BackgroundTask, CurrentTask, PgTask, QueueConfig, RetentionMode};
+use backie::{BackgroundTask, BackgroundTaskExt, CurrentTask, QueueConfig, RetentionMode};
 use backie::{PgTaskStore, WorkerPool};
 use diesel_async::pg::AsyncPgConnection;
 use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -155,7 +154,7 @@ async fn main() -> anyhow::Result<()> {
                 let mut connection = pool.get().await.unwrap();
 
                 let task = EmptyTask { idx: i };
-                task.enqueue(&mut connection).await.unwrap();
+                task.enqueue::<PgTaskStore>(&mut connection).await.unwrap();
             }
         });
     }
@@ -165,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     (FinalTask {})
-        .enqueue(&mut pool.get().await.unwrap())
+        .enqueue::<PgTaskStore>(&mut pool.get().await.unwrap())
         .await
         .unwrap();
     log::info!("Tasks created ...");
@@ -173,23 +172,25 @@ async fn main() -> anyhow::Result<()> {
     let started = Instant::now();
 
     // Register the task types I want to use and start the worker pool
-    let join_handle = WorkerPool::new(PgTaskStore::new(pool.clone()), move || my_app_context.clone())
-        .register_task_type::<MyTask>()
-        .register_task_type::<MyFailingTask>()
-        .register_task_type::<EmptyTask>()
-        .register_task_type::<FinalTask>()
-        .configure_queue("default".into())
-        .configure_queue(
-            QueueConfig::new("loaded_queue")
-                .pull_interval(Duration::from_millis(100))
-                .retention_mode(RetentionMode::RemoveDone)
-                .num_workers(300),
-        )
-        .start(async move {
-            let _ = rx.changed().await;
-        })
-        .await
-        .unwrap();
+    let join_handle = WorkerPool::new(PgTaskStore::new(pool.clone()), move || {
+        my_app_context.clone()
+    })
+    .register_task_type::<MyTask>()
+    .register_task_type::<MyFailingTask>()
+    .register_task_type::<EmptyTask>()
+    .register_task_type::<FinalTask>()
+    .configure_queue("default".into())
+    .configure_queue(
+        QueueConfig::new("loaded_queue")
+            .pull_interval(Duration::from_millis(100))
+            .retention_mode(RetentionMode::RemoveDone)
+            .num_workers(300),
+    )
+    .start(async move {
+        let _ = rx.changed().await;
+    })
+    .await
+    .unwrap();
 
     log::info!("Workers started ...");
 
