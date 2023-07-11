@@ -39,6 +39,7 @@ where
 #[cfg(test)]
 pub mod test_store {
     use super::*;
+    use crate::NewTask;
     use itertools::Itertools;
     use std::collections::BTreeMap;
     use std::sync::Arc;
@@ -50,26 +51,9 @@ pub mod test_store {
     }
 
     #[async_trait::async_trait]
-    pub trait MemoryTask {
-        async fn enqueue(self, store: &MemoryTaskStore) -> Result<(), AsyncQueueError>;
-    }
-
-    #[async_trait::async_trait]
-    impl<T> MemoryTask for T
-    where
-        T: BackgroundTask,
-    {
-        async fn enqueue(self, store: &MemoryTaskStore) -> Result<(), AsyncQueueError> {
-            let mut tasks = store.tasks.lock().await;
-            let new_task = NewTask::new::<T>(self)?;
-            let task = Task::from(new_task);
-            tasks.insert(task.id, task);
-            Ok(())
-        }
-    }
-
-    #[async_trait::async_trait]
     impl TaskStore for MemoryTaskStore {
+        type Connection = Self;
+
         async fn pull_next_task(
             &self,
             queue_name: &str,
@@ -156,6 +140,17 @@ pub mod test_store {
 
             Ok(task.clone())
         }
+
+        async fn enqueue<T: BackgroundTask>(
+            store: &mut Self::Connection,
+            task: T,
+        ) -> Result<(), AsyncQueueError> {
+            let mut tasks = store.tasks.lock().await;
+            let new_task = NewTask::new(task)?;
+            let task = Task::from(new_task);
+            tasks.insert(task.id, task);
+            Ok(())
+        }
     }
 }
 
@@ -181,17 +176,7 @@ pub trait TaskStore: Send + Sync + 'static {
     async fn enqueue<T: BackgroundTask>(
         conn: &mut Self::Connection,
         task: T,
-    ) -> Result<(), AsyncQueueError>;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::store::test_store::MemoryTaskStore;
-
-    #[test]
-    fn task_store_trait_is_object_safe() {
-        let store = MemoryTaskStore::default();
-        let _object = &store as &dyn TaskStore;
-    }
+    ) -> Result<(), AsyncQueueError>
+    where
+        Self: Sized;
 }
