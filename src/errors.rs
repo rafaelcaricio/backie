@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use thiserror::Error;
 
 /// Library errors
@@ -29,4 +31,7 @@ pub enum AsyncQueueError {
 
     #[error("Task with name {0} is not serializable to JSON")]
     JsonError(#[from] serde_json::Error),
+
+    #[error(transparent)]
+    Other(#[from] Box<dyn Error + Send + Sync>),
 }

@@ -223,9 +223,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::test_store::{MemoryTask, MemoryTaskStore};
+    use crate::store::test_store::MemoryTaskStore;
     use crate::store::PgTaskStore;
     use crate::task::CurrentTask;
+    use crate::BackgroundTaskExt;
     use async_trait::async_trait;
     use diesel_async::pooled_connection::{bb8::Pool, AsyncDieselConnectionManager};
     use diesel_async::AsyncPgConnection;
@@ -353,7 +354,7 @@ mod tests {
     async fn test_worker_pool_with_task() {
         let my_app_context = ApplicationContext::new();
 
-        let task_store = memory_store();
+        let mut task_store = memory_store();
 
         let join_handle = WorkerPool::new(task_store.clone(), move || my_app_context.clone())
             .register_task_type::<GreetingTask>()
@@ -365,7 +366,9 @@ mod tests {
         let task = GreetingTask {
             person: "Rafael".to_string(),
         };
-        task.enqueue(&task_store).await.unwrap();
+        task.enqueue::<MemoryTaskStore>(&mut task_store)
+            .await
+            .unwrap();
 
         join_handle.await.unwrap();
     }
@@ -374,7 +377,7 @@ mod tests {
     async fn test_worker_pool_with_multiple_task_types() {
         let my_app_context = ApplicationContext::new();
 
-        let task_store = memory_store();
+        let mut task_store = memory_store();
         let join_handle = WorkerPool::new(task_store.clone(), move || my_app_context.clone())
             .register_task_type::<GreetingTask>()
             .register_task_type::<OtherTask>()
@@ -387,9 +390,14 @@ mod tests {
         let task = GreetingTask {
             person: "Rafael".to_string(),
         };
-        task.enqueue(&task_store).await.unwrap();
+        task.enqueue::<MemoryTaskStore>(&mut task_store)
+            .await
+            .unwrap();
 
-        OtherTask.enqueue(&task_store).await.unwrap();
+        OtherTask
+            .enqueue::<MemoryTaskStore>(&mut task_store)
+            .await
+            .unwrap();
 
         join_handle.await.unwrap();
     }
@@ -433,7 +441,7 @@ mod tests {
             notify_finished: Arc::new(Mutex::new(Some(tx))),
         };
 
-        let memory_store = memory_store();
+        let mut memory_store = memory_store();
 
         let join_handle = WorkerPool::new(memory_store.clone(), move || my_app_context.clone())
             .register_task_type::<NotifyFinished>()
@@ -446,10 +454,16 @@ mod tests {
             .unwrap();
 
         // Notifies the worker pool to stop after the task is executed
-        NotifyFinished.enqueue(&memory_store).await.unwrap();
+        NotifyFinished
+            .enqueue::<MemoryTaskStore>(&mut memory_store)
+            .await
+            .unwrap();
 
         // This makes sure the task can run multiple times and use the shared context
-        NotifyFinished.enqueue(&memory_store).await.unwrap();
+        NotifyFinished
+            .enqueue::<MemoryTaskStore>(&mut memory_store)
+            .await
+            .unwrap();
 
         join_handle.await.unwrap();
     }
@@ -519,7 +533,7 @@ mod tests {
             unknown_task_ran: Arc::new(AtomicBool::new(false)),
         };
 
-        let task_store = memory_store();
+        let mut task_store = memory_store();
 
         let join_handle = WorkerPool::new(task_store.clone(), {
             let my_app_context = my_app_context.clone();
@@ -535,10 +549,16 @@ mod tests {
         .unwrap();
 
         // Enqueue a task that is not registered
-        UnknownTask.enqueue(&task_store).await.unwrap();
+        UnknownTask
+            .enqueue::<MemoryTaskStore>(&mut task_store)
+            .await
+            .unwrap();
 
         // Notifies the worker pool to stop for this test
-        NotifyStopDuringRun.enqueue(&task_store).await.unwrap();
+        NotifyStopDuringRun
+            .enqueue::<MemoryTaskStore>(&mut task_store)
+            .await
+            .unwrap();
 
         join_handle.await.unwrap();
 
@@ -566,7 +586,7 @@ mod tests {
 
         let (notify_stop_worker_pool, should_stop) = tokio::sync::oneshot::channel();
 
-        let task_store = memory_store();
+        let mut task_store = memory_store();
 
         let worker_pool_finished = WorkerPool::new(task_store.clone(), || ())
             .register_task_type::<BrokenTask>()
@@ -578,7 +598,10 @@ mod tests {
             .unwrap();
 
         // Enqueue a task that will panic
-        BrokenTask.enqueue(&task_store).await.unwrap();
+        BrokenTask
+            .enqueue::<MemoryTaskStore>(&mut task_store)
+            .await
+            .unwrap();
 
         notify_stop_worker_pool.send(()).unwrap();
         worker_pool_finished.await.unwrap();
@@ -662,7 +685,7 @@ mod tests {
             ping_rx: Arc::new(Mutex::new(ping_rx)),
         };
 
-        let task_store = memory_store();
+        let mut task_store = memory_store();
 
         let worker_pool_finished = WorkerPool::new(task_store.clone(), {
             let player_context = player_context.clone();
@@ -677,7 +700,10 @@ mod tests {
         .await
         .unwrap();
 
-        KeepAliveTask.enqueue(&task_store).await.unwrap();
+        KeepAliveTask
+            .enqueue::<MemoryTaskStore>(&mut task_store)
+            .await
+            .unwrap();
 
         // Make sure task is running
         println!("Ping!");

@@ -52,15 +52,20 @@ impl BackoffMode {
 }
 
 pub use runnable::BackgroundTask;
-pub use store::{PgTask, PgTaskStore, TaskStore};
-pub use task::{CurrentTask, NewTask, Task, TaskId, TaskState};
+pub use store::{BackgroundTaskExt, TaskStore};
+pub use task::{CurrentTask, NewTask, Task, TaskHash, TaskId, TaskState};
 pub use worker::Worker;
 pub use worker_pool::{QueueConfig, WorkerPool};
 
+#[cfg(feature = "async_postgres")]
+pub use store::PgTaskStore;
+
 mod catch_unwind;
 pub mod errors;
+#[cfg(feature = "async_postgres")]
 mod queries;
 mod runnable;
+#[cfg(feature = "async_postgres")]
 mod schema;
 mod store;
 mod task;

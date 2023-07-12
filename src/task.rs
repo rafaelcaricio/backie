@@ -1,14 +1,13 @@
+#[cfg(feature = "async_postgres")]
 use crate::schema::backie_tasks;
-use crate::{BackgroundTask, BackoffMode};
+use crate::BackoffMode;
 use chrono::DateTime;
 use chrono::Utc;
-use diesel::prelude::*;
 use diesel_derive_newtype::DieselNewType;
 use serde::Serialize;
 use std::borrow::Cow;
 use std::fmt;
 use std::fmt::Display;
-use std::time::Duration;
 use uuid::Uuid;
 
 /// States of a task.
@@ -36,6 +35,18 @@ impl Display for TaskId {
     }
 }
 
+impl From<Uuid> for TaskId {
+    fn from(value: Uuid) -> Self {
+        Self(value)
+    }
+}
+
+impl From<TaskId> for Uuid {
+    fn from(value: TaskId) -> Self {
+        value.0
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, DieselNewType, Serialize)]
 pub struct TaskHash(Cow<'static, str>);
 
@@ -45,8 +56,18 @@ impl TaskHash {
     }
 }
 
-#[derive(Queryable, Identifiable, Debug, Eq, PartialEq, Clone)]
-#[diesel(table_name = backie_tasks)]
+impl<'a> From<&'a TaskHash> for &'a str {
+    fn from(value: &'a TaskHash) -> Self {
+        &value.0
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Clone)]
+#[cfg_attr(
+    feature = "async_postgres",
+    derive(diesel::Queryable, diesel::Identifiable)
+)]
+#[cfg_attr(feature = "async_postgres", diesel(table_name = backie_tasks))]
 pub struct Task {
     /// Unique identifier of the task.
     pub id: TaskId,
@@ -112,8 +133,9 @@ impl Task {
     }
 }
 
-#[derive(Insertable, Debug, Eq, PartialEq, Clone)]
-#[diesel(table_name = backie_tasks)]
+#[derive(Debug, Eq, PartialEq, Clone)]
+#[cfg_attr(feature = "async_postgres", derive(diesel::Insertable))]
+#[cfg_attr(feature = "async_postgres", diesel(table_name = backie_tasks))]
 pub struct NewTask {
     task_name: String,
     queue_name: String,
@@ -125,12 +147,13 @@ pub struct NewTask {
 }
 
 impl NewTask {
+    #[cfg(feature = "async_postgres")]
     pub(crate) fn with_timeout<T>(
         background_task: T,
-        timeout: Duration,
+        timeout: std::time::Duration,
     ) -> Result<Self, serde_json::Error>
     where
-        T: BackgroundTask,
+        T: crate::BackgroundTask,
     {
         let uniq_hash = background_task.uniq();
         let payload = serde_json::to_value(background_task)?;
@@ -146,10 +169,13 @@ impl NewTask {
         })
     }
 
+    #[cfg(feature = "async_postgres")]
     pub(crate) fn new<T>(background_task: T) -> Result<Self, serde_json::Error>
     where
-        T: BackgroundTask,
+        T: crate::BackgroundTask,
     {
+        use std::time::Duration;
+
         Self::with_timeout(background_task, Duration::from_secs(120))
     }
 }
