@@ -27,7 +27,7 @@ diesel-async = { version = "0.3", features = ["postgres", "bb8"], optional = tru
 tokio = { version = "1.25", features = ["rt", "time", "macros", "sync"] }
 
 [dev-dependencies]
-itertools = "0.10"
+itertools = "0.11"
 
 [features]
 default = ["async_postgres"]
